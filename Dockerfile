@@ -57,8 +57,8 @@ ENTRYPOINT ["node", "dist/index.js"]
 
 # ---------------------------------------------------------------------------
 # Fork addition (stkr22): Streamable HTTP for in-cluster use. The server only
-# speaks stdio, so supergateway serves it on :8000/mcp. Build with
-# `--target http`; the default (last) target stays the stdio image.
+# speaks stdio, so supergateway serves it on :8000/mcp. This is the last stage,
+# so it is the default build target; `--target runtime` gives the stdio image.
 # docker/mcp-http/package-lock.json pins the gateway's full dependency tree.
 # The gateway has no auth of its own: the network policy in front is the boundary.
 # ---------------------------------------------------------------------------
