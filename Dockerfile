@@ -17,7 +17,7 @@ COPY src ./src
 RUN npm run build && npm prune --omit=dev --ignore-scripts
 
 # Runtime
-FROM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5
+FROM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
@@ -54,3 +54,24 @@ USER node
 # credentials (tools stay listable, so registries and inspectors can introspect
 # it); every call then fails with setup instructions instead of reaching a server.
 ENTRYPOINT ["node", "dist/index.js"]
+
+# ---------------------------------------------------------------------------
+# Fork addition (stkr22): Streamable HTTP for in-cluster use. The server only
+# speaks stdio, so supergateway serves it on :8000/mcp. This is the last stage,
+# so it is the default build target; `--target runtime` gives the stdio image.
+# docker/mcp-http/package-lock.json pins the gateway's full dependency tree.
+# The gateway has no auth of its own: the network policy in front is the boundary.
+# ---------------------------------------------------------------------------
+FROM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS gateway
+WORKDIR /gateway
+COPY docker/mcp-http/package.json docker/mcp-http/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
+FROM runtime AS http
+COPY --from=gateway /gateway /gateway
+USER node
+EXPOSE 8000
+ENTRYPOINT ["/gateway/node_modules/.bin/supergateway", \
+    "--stdio", "node /app/dist/index.js", \
+    "--outputTransport", "streamableHttp", "--stateful", "--sessionTimeout", "900000", \
+    "--port", "8000", "--healthEndpoint", "/healthz"]
