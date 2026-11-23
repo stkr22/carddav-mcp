@@ -1,0 +1,7 @@
+{
+  "name": "carddav-mcp-http-gateway",
+  "private": true,
+  "dependencies": {
+    "supergateway": "4.2.1"
+  }
+}
