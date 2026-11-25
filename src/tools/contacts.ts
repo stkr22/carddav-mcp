@@ -7,10 +7,10 @@ import {
   SUMMARY_PROPS,
   syncCollectionBody,
   textOf,
-  type PropFilter,
   type VCardProp,
 } from '../dav-xml.js';
 import { ToolInputError } from '../errors.js';
+import { buildFilter, fieldsOf, whereSchema } from '../filter.js';
 import {
   boundedLimit,
   listCards,
@@ -232,25 +232,38 @@ export function registerContactTools(
     {
       title: 'Find contacts',
       description:
-        'Finds contacts whose name, organisation, email address, phone ' +
-        'number or note contains a term. One request per address book — ' +
-        'CardDAV combines the fields with OR, unlike CalDAV — and the result ' +
-        'is checked again here, because some servers filter only partially.',
+        'Finds contacts. Two ways to say what you want, usable together. ' +
+        '`query` is plain words — "laura meier" finds a card stored as ' +
+        '"Meier Laura" — each of which must appear in a name, organisation, ' +
+        'email or phone number. `where` is exact conditions on named vCard ' +
+        'properties (BDAY, URL, TITLE, NOTE …): all of `all`, one of `any`, ' +
+        'none of `none`, each {field, op, value} with op contains, equals, ' +
+        'starts_with, ends_with, exists or missing. Dates match as digits, so ' +
+        '{field:"BDAY", op:"contains", value:"0415"} finds 15 April however ' +
+        'it is stored — for "who has a birthday soon" use upcoming_dates. ' +
+        'Whatever the server could not filter is filtered here, and ' +
+        '`matched_with` says which.',
       inputSchema: z.object({
         query: z
           .string()
           .min(1)
           .max(512)
-          .describe('The term to look for. Matched case-insensitively.'),
+          .optional()
+          .describe(
+            'Words to look for, matched case-insensitively. Every word must ' +
+              'match somewhere in `fields`.'
+          ),
         fields: z
           .array(searchField)
           .min(1)
           .max(10)
           .optional()
           .describe(
-            'Which vCard properties to match against. Defaults to FN, ' +
-              'NICKNAME, EMAIL, TEL and ORG — the fields somebody searches by.'
+            'Which vCard properties `query` is matched against. Defaults to ' +
+              'FN, NICKNAME, EMAIL, TEL and ORG — the fields somebody ' +
+              'searches by.'
           ),
+        where: whereSchema.optional(),
         address_books: addressBooksParam,
         limit: limitParam,
       }),
@@ -263,7 +276,9 @@ export function registerContactTools(
           .string()
           .describe(
             '"server-filter" when the backend did the filtering, ' +
-              '"client-filter" when it cannot and every card was fetched.'
+              '"server-prefilter" when it narrowed the request and the rest ' +
+              'was finished here, "client-filter" when every card was ' +
+              'fetched and matched here.'
           ),
         collation: z
           .string()
@@ -280,23 +295,25 @@ export function registerContactTools(
           context.config.maxEntries,
           MAX_MAX_ENTRIES
         );
-        const fields = args.fields ?? ['FN', 'NICKNAME', 'EMAIL', 'TEL', 'ORG'];
-        const filters: PropFilter[] = fields.map((field) => ({
-          field,
-          term: args.query,
-        }));
+        const filter = buildFilter(args);
+        if (filter === undefined) {
+          throw new ToolInputError(
+            'carddav-mcp: pass query, where, or both. To list everything, ' +
+              'use list_contacts.'
+          );
+        }
 
         // The summary plus whatever is being searched on. The local re-check
         // runs against the card as retrieved, so a searchable property the
         // listing does not fetch (NOTE, ROLE) made every match on it look like
         // a false positive.
         const retrieved = [
-          ...new Set<VCardProp>([...SUMMARY_PROPS, ...fields]),
+          ...new Set<VCardProp>([...SUMMARY_PROPS, ...fieldsOf(filter)]),
         ];
         const outcome = await searchCards(
           context.api,
           books,
-          filters,
+          filter,
           retrieved
         );
 

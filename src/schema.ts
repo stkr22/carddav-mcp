@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { hasControlCharacters } from './analyze.js';
 import { MAX_MAX_ENTRIES } from './config.js';
+import { VCARD_PROPS } from './dav-xml.js';
 
 /**
  * Input schemas more than one tool uses.
@@ -169,15 +170,4 @@ export const rawVCard = z
   );
 
 /** vCard properties `search_contacts` will match against. */
-export const searchField = z.enum([
-  'FN',
-  'N',
-  'NICKNAME',
-  'EMAIL',
-  'TEL',
-  'ORG',
-  'TITLE',
-  'NOTE',
-  'CATEGORIES',
-  'UID',
-]);
+export const searchField = z.enum(VCARD_PROPS);

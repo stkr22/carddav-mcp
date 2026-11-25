@@ -1,15 +1,14 @@
 import { CardDavApiError, type CardDavApi } from './api.js';
-import { stripInvisible } from './analyze.js';
 import { resourceUrl, type AddressBookEntry } from './books.js';
 import {
   addressbookQueryBody,
   addressbookSearchBody,
   textOf,
-  type PropFilter,
   type VCardProp,
 } from './dav-xml.js';
 import { ToolInputError } from './errors.js';
-import { parseVCard, readList, type ICAL } from './vcard.js';
+import { matchesFilter, planServerFilter, type Node } from './filter.js';
+import { parseVCard, type ICAL } from './vcard.js';
 
 /**
  * The read pipeline: query a collection, get cards back, shape them.
@@ -117,8 +116,14 @@ export async function listCards(
   return all;
 }
 
-/** Which way a search result was arrived at, reported in the answer. */
-export type SearchPath = 'server-filter' | 'client-filter';
+/**
+ * Which way a search result was arrived at, reported in the answer.
+ *
+ * `server-prefilter` is the middle case: the server narrowed the request to a
+ * superset of the answer — all it can do for a filter RFC 6352 has no way to
+ * say — and the rest was finished here.
+ */
+export type SearchPath = 'server-filter' | 'server-prefilter' | 'client-filter';
 
 export interface SearchOutcome {
   documents: ResourceDocument[];
@@ -139,7 +144,9 @@ export interface SearchOutcome {
  * much is indistinguishable from one that matched properly — the caller would
  * simply see wrong hits. So whatever comes back is checked again locally
  * against the same criteria. The cost is a comparison per card; the benefit is
- * that the answer means the same thing on every backend.
+ * that the answer means the same thing on every backend. For a filter the wire
+ * format cannot express (`filter.ts`) the server sends a superset and this is
+ * where it becomes exact.
  *
  * **A collation the server refuses is retried once.** RFC 6352 lets a server
  * reject an unsupported collation with a `supported-collation` precondition.
@@ -151,18 +158,33 @@ export interface SearchOutcome {
  * on the query means this backend does not do `text-match`, which is a
  * legitimate if unhelpful position. Fetching the collection and filtering here
  * is slower and always correct, and the answer says which path was taken so
- * nobody has to guess why a search took four seconds.
+ * nobody has to guess why a search took four seconds. The same listing is what
+ * a filter with nothing safe to send (a negation, a date) costs.
+ *
+ * `props` must include every property the filter reads: the re-check runs
+ * against the card as retrieved.
  */
 export async function searchCards(
   api: CardDavApi,
   books: readonly AddressBookEntry[],
-  filters: readonly PropFilter[],
+  filter: Node,
   props?: readonly VCardProp[]
 ): Promise<SearchOutcome> {
   const notes: string[] = [];
   let path: SearchPath = 'server-filter';
   let collation: string | undefined;
   const all: ResourceDocument[] = [];
+
+  const plan = planServerFilter(filter);
+  if (plan === undefined) {
+    path = 'client-filter';
+    notes.push(
+      'This filter cannot be narrowed on the server (it negates a condition ' +
+        'or compares a date), so every card was fetched and matched here.'
+    );
+  } else if (!plan.exact) {
+    path = 'server-prefilter';
+  }
 
   // Bound once. Under `exactOptionalPropertyTypes` an absent `props` has to be
   // an absent *key*, not a key holding `undefined`.
@@ -174,10 +196,16 @@ export async function searchCards(
       documents = await queryBook(
         api,
         book,
-        addressbookSearchBody(filters, narrowing)
+        plan === undefined
+          ? addressbookQueryBody(props)
+          : addressbookSearchBody(plan.filters, {
+              ...narrowing,
+              test: plan.test,
+            })
       );
     } catch (error) {
       if (
+        plan !== undefined &&
         error instanceof CardDavApiError &&
         error.precondition === 'supported-collation'
       ) {
@@ -185,13 +213,18 @@ export async function searchCards(
         documents = await queryBook(
           api,
           book,
-          addressbookSearchBody(filters, { ...narrowing, collation })
+          addressbookSearchBody(plan.filters, {
+            ...narrowing,
+            collation,
+            test: plan.test,
+          })
         );
         notes.push(
           `${book.path} refused the default collation, so the search named ` +
             `${collation} explicitly.`
         );
       } else if (
+        plan !== undefined &&
         error instanceof CardDavApiError &&
         (error.status === 400 || error.status === 501)
       ) {
@@ -213,9 +246,7 @@ export async function searchCards(
   const matched = all.filter((document) => {
     try {
       const card = parseVCard(document.vcf, 'a card in the search result');
-      return filters.some(({ field, term }) =>
-        fieldContains(card, field, term)
-      );
+      return matchesFilter(card, filter);
     } catch {
       // An unreadable card cannot be matched, and dropping it here is right:
       // it would fail again in shaping, and a search is not the place to
@@ -226,7 +257,7 @@ export async function searchCards(
     }
   });
 
-  if (matched.length < all.length) {
+  if (path === 'server-filter' && matched.length < all.length) {
     notes.push(
       `${all.length - matched.length} card(s) the server returned did not ` +
         'actually match and were dropped here.'
@@ -239,34 +270,6 @@ export async function searchCards(
     ...(collation === undefined ? {} : { collation }),
     notes,
   };
-}
-
-/**
- * Whether one vCard property contains a term, case-insensitively.
- *
- * Folded through `stripInvisible` on both sides. A card whose `FN` carries a
- * zero-width space between two letters is a card a plain `includes` will not
- * find, and hiding from a search is exactly what that character is there for.
- */
-export function fieldContains(
-  card: ICAL.Component,
-  field: VCardProp,
-  term: string
-): boolean {
-  const needle = stripInvisible(term).trim().toLowerCase();
-  if (needle.length === 0) return false;
-  const haystacks = valuesOf(card, field);
-  return haystacks.some((value) =>
-    stripInvisible(value).toLowerCase().includes(needle)
-  );
-}
-
-/**
- * Every string a field contributes, across all its occurrences and all the
- * values of each — `CATEGORIES:history,maths` must be found by "maths".
- */
-function valuesOf(card: ICAL.Component, field: VCardProp): string[] {
-  return readList(card, field.toLowerCase());
 }
 
 /**

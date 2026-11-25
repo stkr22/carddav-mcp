@@ -439,17 +439,52 @@ export class FakeCardDav {
       );
     }
 
-    // The filter, read out of the body the way a server would. Sibling
-    // prop-filters are combined with OR, which is CardDAV's default and the
-    // whole reason a multi-field search is one request here.
+    // The filter, read out of the body the way a server would: one flat list
+    // of prop-filters under one `test`, which is all RFC 6352 can say.
     const filters = [
       ...body.matchAll(
-        /<C:prop-filter name="([A-Z-]+)">\s*<C:text-match[^>]*>([\s\S]*?)<\/C:text-match>/g
+        /<C:prop-filter name="([A-Z-]+)"(?:\/>|>([\s\S]*?)<\/C:prop-filter>)/g
       ),
-    ].map((match) => ({
-      field: match[1] ?? '',
-      term: unescapeXml(match[2] ?? '').toLowerCase(),
-    }));
+    ].map((match) => {
+      const inner = match[2] ?? '';
+      const text =
+        /<C:text-match[^>]*match-type="([a-z-]+)"[^>]*>([\s\S]*?)<\/C:text-match>/.exec(
+          inner
+        );
+      return {
+        field: match[1] ?? '',
+        kind: inner.includes('is-not-defined')
+          ? ('missing' as const)
+          : text === null
+            ? ('exists' as const)
+            : ('text' as const),
+        type: text?.[1] ?? 'contains',
+        term: unescapeXml(text?.[2] ?? '').toLowerCase(),
+      };
+    });
+    const allOf = /<C:filter test="allof"/.test(body);
+
+    const matches = (
+      vcf: string,
+      filter: (typeof filters)[number]
+    ): boolean => {
+      const values = propertyValues(vcf, filter.field);
+      if (filter.kind === 'exists') return values.length > 0;
+      if (filter.kind === 'missing') return values.length === 0;
+      return values.some((raw) => {
+        const value = raw.toLowerCase();
+        switch (filter.type) {
+          case 'equals':
+            return value === filter.term;
+          case 'starts-with':
+            return value.startsWith(filter.term);
+          case 'ends-with':
+            return value.endsWith(filter.term);
+          default:
+            return value.includes(filter.term);
+        }
+      });
+    };
 
     const wanted = propsAsked(body);
     const parts: string[] = [];
@@ -457,11 +492,9 @@ export class FakeCardDav {
       if (
         filters.length > 0 &&
         this.options.looseFilter !== true &&
-        !filters.some(({ field, term }) =>
-          propertyValues(resource.vcf, field).some((value) =>
-            value.toLowerCase().includes(term)
-          )
-        )
+        !(allOf
+          ? filters.every((filter) => matches(resource.vcf, filter))
+          : filters.some((filter) => matches(resource.vcf, filter)))
       ) {
         continue;
       }

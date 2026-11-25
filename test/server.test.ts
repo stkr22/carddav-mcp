@@ -789,3 +789,124 @@ describe('search_contacts: a field the summary does not carry', () => {
     expect(data.count).toBe(1);
   });
 });
+
+const reportBodies = (since: number): string[] =>
+  fake.requests
+    .slice(since)
+    .filter((request) => request.method === 'REPORT')
+    .map((request) => request.body ?? '');
+
+describe('search_contacts: where', () => {
+  it('refuses a call with neither query nor where', async () => {
+    await open();
+    const result = await call(session, 'search_contacts', {});
+    expect(textOf(result)).toContain('pass query, where, or both');
+  });
+
+  it('sends all as an allof filter and answers from the server', async () => {
+    await open();
+    const before = fake.requests.length;
+    const data = dataOf(
+      await call(session, 'search_contacts', {
+        where: {
+          all: [
+            { field: 'TITLE', op: 'starts_with', value: 'math' },
+            { field: 'NOTE', op: 'exists' },
+          ],
+        },
+      })
+    );
+    expect(data.count).toBe(1);
+    expect(data.matched_with).toBe('server-filter');
+    const [body] = reportBodies(before);
+    expect(body).toContain('<C:filter test="allof">');
+    expect(body).toContain('match-type="starts-with">math</C:text-match>');
+    expect(body).toContain('<C:prop-filter name="NOTE"/>');
+  });
+
+  it('finds a contact by birthday however the date is written, listing the book', async () => {
+    await open();
+    fake.seed(
+      'work',
+      'x.vcf',
+      vcard({ UID: 'u-x', FN: 'Xena', BDAY: '19901209' })
+    );
+    // GRACE is --1209 in the private book, Xena 19901209 in work: one query.
+    const before = fake.requests.length;
+    const data = dataOf(
+      await call(session, 'search_contacts', {
+        where: { all: [{ field: 'BDAY', op: 'contains', value: '1209' }] },
+      })
+    );
+    expect(data.count).toBe(2);
+    expect(data.matched_with).toBe('client-filter');
+    expect(
+      reportBodies(before).every((body) => !body.includes('prop-filter'))
+    ).toBe(true);
+  });
+
+  it('excludes with none, evaluated here', async () => {
+    await open();
+    const data = dataOf(
+      await call(session, 'search_contacts', {
+        where: { none: [{ field: 'EMAIL', op: 'contains', value: 'ada@' }] },
+      })
+    );
+    const names = (data.contacts as Record<string, unknown>[]).map(
+      (contact) => contact.formatted_name
+    );
+    expect(names).toContain('Grace Hopper');
+    expect(names).not.toContain('Ada Lovelace');
+  });
+
+  it('narrows a multi-word query on the server and finishes it here', async () => {
+    await open();
+    const data = dataOf(
+      await call(session, 'search_contacts', { query: 'grace navy' })
+    );
+    expect(data.matched_with).toBe('server-prefilter');
+    expect(data.count).toBe(1);
+    const none = dataOf(
+      await call(session, 'search_contacts', { query: 'grace lovelace' })
+    );
+    expect(none.count).toBe(0);
+  });
+
+  it('finds a card stored surname first by the name in the other order', async () => {
+    await open();
+    fake.seed(
+      'work',
+      'laura.vcf',
+      vcard({ UID: 'u-l', FN: 'Meier Laura', N: 'Meier;Laura;;;' })
+    );
+    const data = dataOf(
+      await call(session, 'search_contacts', { query: 'Laura Meier' })
+    );
+    expect(data.count).toBe(1);
+  });
+
+  it('refuses a field name that is not a vCard property', async () => {
+    await open();
+    const result = await call(session, 'search_contacts', {
+      where: { all: [{ field: 'FN"/><C:x', op: 'exists' }] },
+    });
+    expect(JSON.stringify(result)).toMatch(/invalid|Invalid/);
+    const reports = fake.requests.filter(
+      (request) => request.method === 'REPORT'
+    );
+    expect(
+      reports.every((request) => !(request.body ?? '').includes('<C:x'))
+    ).toBe(true);
+  });
+
+  it('falls back to listing when the server cannot filter, for a where too', async () => {
+    await open({ refuseFiltering: true });
+    const data = dataOf(
+      await call(session, 'search_contacts', {
+        where: { all: [{ field: 'ORG', op: 'equals', value: 'Navy' }] },
+      })
+    );
+    expect(data.matched_with).toBe('client-filter');
+    expect(data.count).toBe(1);
+  });
+});

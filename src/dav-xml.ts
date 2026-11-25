@@ -581,29 +581,32 @@ ${elements}
  * attribute values in a request body, and a caller-supplied string must never
  * reach one.
  */
-export type VCardProp =
-  | 'UID'
-  | 'FN'
-  | 'N'
-  | 'NICKNAME'
-  | 'EMAIL'
-  | 'TEL'
-  | 'ORG'
-  | 'TITLE'
-  | 'ROLE'
-  | 'ADR'
-  | 'NOTE'
-  | 'CATEGORIES'
-  | 'BDAY'
-  | 'ANNIVERSARY'
-  | 'URL'
-  | 'IMPP'
-  | 'REV'
-  | 'VERSION'
-  | 'KIND'
-  | 'MEMBER'
-  | 'X-ADDRESSBOOKSERVER-KIND'
-  | 'X-ADDRESSBOOKSERVER-MEMBER';
+export const VCARD_PROPS = [
+  'UID',
+  'FN',
+  'N',
+  'NICKNAME',
+  'EMAIL',
+  'TEL',
+  'ORG',
+  'TITLE',
+  'ROLE',
+  'ADR',
+  'NOTE',
+  'CATEGORIES',
+  'BDAY',
+  'ANNIVERSARY',
+  'URL',
+  'IMPP',
+  'REV',
+  'VERSION',
+  'KIND',
+  'MEMBER',
+  'X-ADDRESSBOOKSERVER-KIND',
+  'X-ADDRESSBOOKSERVER-MEMBER',
+] as const;
+
+export type VCardProp = (typeof VCARD_PROPS)[number];
 
 /**
  * The properties a summary listing asks for.
@@ -684,15 +687,26 @@ ${addressData(props)}
 /** How a `text-match` compares its term. RFC 6352 §10.5.4. */
 export type MatchType = 'contains' | 'equals' | 'starts-with' | 'ends-with';
 
+/**
+ * What one `prop-filter` asks of one property.
+ *
+ * `exists` is a `prop-filter` with no children, which RFC 6352 §10.5.1 defines
+ * as "the property is present"; `missing` is its `is-not-defined` child. Neither
+ * carries a term.
+ */
+export type FilterMatch = MatchType | 'exists' | 'missing';
+
 /** One field of a search, with the term it is matched against. */
 export interface PropFilter {
   field: VCardProp;
+  /** Ignored for `exists` and `missing`. */
   term: string;
+  /** Overrides the body-wide match type for this one filter. */
+  match?: FilterMatch;
 }
 
 /**
- * An `addressbook-query` REPORT matching a term against several properties at
- * once.
+ * An `addressbook-query` REPORT matching terms against properties.
  *
  * **One request, not one per field** — and that is a real difference from the
  * sister server rather than a shortcut. RFC 4791 combines sibling
@@ -701,10 +715,19 @@ export interface PropFilter {
  * `<C:filter>` a `test` attribute that defaults to **`anyof`**, so the same
  * question is one round trip here.
  *
- * The `test="anyof"` is written out rather than left to the default. It is the
- * whole semantics of the call, a reader should not have to know the default to
- * see that this is an OR, and a server that got the default wrong would return
- * an intersection that looks like "no matches" instead of an error.
+ * The `test` is written out rather than left to the default. It is the whole
+ * semantics of the call, a reader should not have to know the default to see
+ * that this is an OR, and a server that got the default wrong would return an
+ * intersection that looks like "no matches" instead of an error.
+ *
+ * `allof` is the AND over different (or the same) properties. There is nothing
+ * finer than this on the wire: a filter is one flat list of `prop-filter`s with
+ * one `test`, so a tree with mixed AND and OR cannot be expressed, and a caller
+ * with one sends a *superset* of what it wants and evaluates the rest itself.
+ *
+ * Every variable piece of text — the field name and the match type from closed
+ * unions, the term through {@link escapeXmlText} — is one of the two kinds that
+ * cannot carry markup.
  */
 export function addressbookSearchBody(
   filters: readonly PropFilter[],
@@ -712,6 +735,7 @@ export function addressbookSearchBody(
     matchType?: MatchType;
     collation?: string;
     props?: readonly VCardProp[];
+    test?: 'anyof' | 'allof';
   } = {}
 ): string {
   if (filters.length === 0) {
@@ -723,13 +747,22 @@ export function addressbookSearchBody(
       ? ''
       : ` collation="${escapeXmlText(options.collation)}"`;
   const body = filters
-    .map(
-      ({ field, term }) =>
+    .map(({ field, term, match = matchType }) => {
+      if (match === 'exists') return `    <C:prop-filter name="${field}"/>`;
+      if (match === 'missing') {
+        return (
+          `    <C:prop-filter name="${field}">\n` +
+          `      <C:is-not-defined/>\n` +
+          `    </C:prop-filter>`
+        );
+      }
+      return (
         `    <C:prop-filter name="${field}">\n` +
-        `      <C:text-match${collation} match-type="${matchType}">` +
+        `      <C:text-match${collation} match-type="${match}">` +
         `${escapeXmlText(term)}</C:text-match>\n` +
         `    </C:prop-filter>`
-    )
+      );
+    })
     .join('\n');
   return `${DECL}
 <C:addressbook-query ${NS}>
@@ -737,7 +770,7 @@ export function addressbookSearchBody(
     <D:getetag/>
 ${addressData(options.props)}
   </D:prop>
-  <C:filter test="anyof">
+  <C:filter test="${options.test ?? 'anyof'}">
 ${body}
   </C:filter>
 </C:addressbook-query>
