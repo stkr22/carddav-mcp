@@ -1,21 +1,30 @@
-name: Build arm64 HTTP image
+name: Image
 
-# Fork addition. The cluster is arm64 and the server only speaks stdio, so this
-# builds the `http` target (server + supergateway) natively on an arm runner.
+# The cluster is arm64 and the server only speaks stdio, so this builds the
+# `http` target (server + supergateway) natively on an arm runner and pushes it
+# to this repository's own registry.
+#
+# What gets which tag matters, because a deployment pins one:
+#   * a push to main builds `main` and `sha-<commit>` — a moving tag and an exact
+#     one, never a version number;
+#   * a release tag `vX.Y.Z` builds `X.Y.Z`, `X.Y` and `latest`.
+# A version tag therefore only ever points at the build of its own tag. An image
+# that pods were started from used to be overwritten by every push to main.
 on:
   push:
     branches: [main]
+    tags: ['v*.*.*']
     paths:
       - src/**
       - Dockerfile
       - package.json
       - package-lock.json
       - docker/mcp-http/**
-      - .github/workflows/arm64-http-image.yml
+      - .github/workflows/image.yml
   workflow_dispatch:
 
 env:
-  IMAGE: ghcr.io/stkr22/carddav-mcp
+  IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
   build:
@@ -38,16 +47,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: version
-        run: echo "v=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
-
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=raw,value=${{ steps.version.outputs.v }}
-            type=sha
+            type=raw,value=main,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -57,9 +66,7 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          labels: |
-            ${{ steps.meta.outputs.labels }}
-            org.opencontainers.image.source=https://github.com/stkr22/carddav-mcp
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
