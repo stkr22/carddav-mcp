@@ -1,10 +1,10 @@
 # Tool reference
 
-All 17 tools: 10 read, 7 write.
+All 18 tools: 11 read, 7 write.
 With `CARDDAV_READ_ONLY=true` the write tools are not registered at all —
 they do not appear in `tools/list`.
 
-All 17 are registered unless you say otherwise. `CARDDAV_ALLOW_TOOLS`
+All 18 are registered unless you say otherwise. `CARDDAV_ALLOW_TOOLS`
 and `CARDDAV_DENY_TOOLS` narrow the list to the ones you want, and
 `CARDDAV_ALLOW_TOOLS=essential` selects the 6 marked **essential**
 below — see [choosing the tools that load](/guide/configuration#choosing-the-tools-that-load).
@@ -52,12 +52,16 @@ Takes no parameters.
 
 **List contacts** — read-only, **essential**
 
-Contacts in one or more address books, as short summaries: name, organisation, addresses and phone numbers, and whether a photo is present. Only the summary properties are fetched, so this stays cheap on a large address book — get_contact returns the whole card.
+Contacts in one or more address books, as short summaries: name, organisation, title, email addresses, phone numbers, categories, birthday, anniversary, and whether a photo is present. `include` adds urls, addresses or messaging handles. Only these properties are fetched, so this stays cheap on a large address book — get_contact returns the whole card. Sorted by name; `offset` pages.
+
+The answer carries `total`, the number of contacts before `limit` and `offset`, and a note naming the `offset` of the next page when it was cut short.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `address_books` | string[] | no | Which address books to look in. Leave it out for every address book this server may see. |
 | `limit` | integer | no | How many entries to return. Defaults to CARDDAV_MAX_CONTACTS, at most 500. |
+| `offset` | integer | no | Entries to skip, for the next page. Results are sorted by name, so offset=limit continues where the previous call stopped. |
+| `include` | `"urls"` \| `"addresses"` \| `"impp"` \| `"all"`[] | no | Extra properties per contact, which cost context. Names, organisation, title, emails, phones, categories, birthday and anniversary are always there. get_contact has the rest. |
 | `include_groups` | boolean | no | Include group cards in the listing. Off by default: a group is a vCard like any other, and mixing them into a contact list is usually not what was meant. list_groups reads them properly. |
 
 ### `get_contact`
@@ -74,14 +78,58 @@ The complete card behind an id: every address, every phone number, the note, the
 
 **Find contacts** — read-only, **essential**
 
-Finds contacts whose name, organisation, email address, phone number or note contains a term. One request per address book — CardDAV combines the fields with OR, unlike CalDAV — and the result is checked again here, because some servers filter only partially.
+Finds contacts. Two ways to say what you want, usable together.
+
+`query` is plain words. Every word must appear somewhere in `fields` (a name, organisation, email address or phone number by default), so "laura meier" finds a card stored as "Meier Laura". Matching is case-insensitive and ignores invisible characters.
+
+`where` is exact conditions on named vCard properties — `BDAY`, `URL`, `TITLE`, `NOTE` and every other property the server names. A contact matches when **all** of `all` match, **at least one** of `any` matches and **none** of `none` match. Each condition is `{field, op, value}`; `op` is `contains`, `equals`, `starts_with`, `ends_with`, `exists` or `missing` (the last two take no value).
+
+```json
+{ "where": { "all": [{ "field": "TITLE", "op": "contains", "value": "lead" }],
+             "none": [{ "field": "URL", "op": "exists" }] } }
+```
+
+A date is compared as digits, so `{"field": "BDAY", "op": "contains", "value": "0415"}` finds 15 April whether the card says `19900415`, `1990-04-15`, `--0415` or `--04-15`. For "who has a birthday soon", use `upcoming_dates` instead.
+
+What CardDAV can express is sent to the server — one request per address book, with `allof` or `anyof`, `is-not-defined` and the match type. What it cannot (a negation, a date comparison, an AND of ORs) is finished here, and the whole result is checked again either way, because some servers filter only partially. `matched_with` says which happened:
+
+- `server-filter` — the server did exactly what was asked.
+- `server-prefilter` — the server narrowed the request to a superset and the rest was finished here.
+- `client-filter` — nothing could be narrowed (or the server cannot filter), so every card was fetched and matched here.
+
+Results are sorted by name; `total` is the number that matched before `limit` and `offset`.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `query` | string | yes | The term to look for. Matched case-insensitively. |
-| `fields` | `"FN"` \| `"N"` \| `"NICKNAME"` \| `"EMAIL"` \| `"TEL"` \| `"ORG"` \| `"TITLE"` \| `"NOTE"` \| `"CATEGORIES"` \| `"UID"`[] | no | Which vCard properties to match against. Defaults to FN, NICKNAME, EMAIL, TEL and ORG — the fields somebody searches by. |
+| `query` | string | no | Words to look for, matched case-insensitively. Every word must match somewhere in `fields`. Up to 8 words. |
+| `fields` | vCard property[] | no | Which vCard properties `query` is matched against. Defaults to FN, NICKNAME, EMAIL, TEL and ORG — the fields somebody searches by. |
+| `where` | object | no | `{all?, any?, none?}`, each a list of up to 20 conditions in total. See above. |
 | `address_books` | string[] | no | Which address books to look in. Leave it out for every address book this server may see. |
 | `limit` | integer | no | How many entries to return. Defaults to CARDDAV_MAX_CONTACTS, at most 500. |
+| `offset` | integer | no | Entries to skip, for the next page. |
+| `include` | `"urls"` \| `"addresses"` \| `"impp"` \| `"all"`[] | no | Extra properties per contact. |
+
+At least one of `query` and `where` is required.
+
+### `upcoming_dates`
+
+**Upcoming birthdays and anniversaries** — read-only
+
+Birthdays and anniversaries that fall inside a window of days, sorted by date, with the age or the number of years where the card states a year. It does the calendar arithmetic, because CardDAV has no date filter and a model gets "the next 7 days across a month end" wrong: month and year ends are handled, and 29 February is observed on 28 February in a year without one, with `shifted_from: "02-29"` saying so.
+
+`days` counts calendar days starting at `from`, so `days: 1` is that one day and `days: 7` is the coming week. "Today" is read in the server's own time zone (`TZ`), which the answer names. A year of 1604 or 0 is a placeholder some clients write for "no year" and is not reported as one.
+
+Only cards that have the date at all are fetched from the server; the rest is computed here.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `from` | string | no | First day: "today" (the default) or YYYY-MM-DD. |
+| `days` | integer | no | Calendar days in the window, counting `from` itself. Default 7, at most 366. |
+| `to` | string | no | Last day, YYYY-MM-DD, instead of `days`. |
+| `kinds` | `"birthday"` \| `"anniversary"`[] | no | Both, by default. |
+| `address_books` | string[] | no | Which address books to look in. |
+| `limit` | integer | no | How many events to return. |
+| `offset` | integer | no | Events to skip, for the next page. |
 
 ### `get_contact_photo`
 

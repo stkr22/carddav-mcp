@@ -9,6 +9,7 @@ import { Discovery } from './discovery.js';
 import { registerBookTools } from './tools/books.js';
 import { ALL_TOOLS, ESSENTIAL_TOOLS, READ_TOOLS } from './tools/catalogue.js';
 import type { ToolContext } from './tools/common.js';
+import { registerDateTools } from './tools/dates.js';
 import { registerContactTools } from './tools/contacts.js';
 import { registerContactWriteTools } from './tools/contacts-write.js';
 import {
@@ -124,6 +125,7 @@ export function createServer(config: Config): McpServer {
 
   registerBookTools(server, context);
   registerContactTools(server, context);
+  registerDateTools(server, context);
   registerGroupReadTools(server, context);
 
   // Read-only mode does not register the write tools at all. Rejecting them at

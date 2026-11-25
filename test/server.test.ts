@@ -1029,3 +1029,162 @@ describe('listings: birthday, include and paging', () => {
     expect(last.notes).toBeUndefined();
   });
 });
+
+const events = (data: Record<string, unknown>) =>
+  data.events as Record<string, unknown>[];
+
+describe('upcoming_dates', () => {
+  const people = {
+    'a.vcf': vcard({ UID: 'u-a', FN: 'Anna', BDAY: '19900415' }),
+    'b.vcf': vcard({ UID: 'u-b', FN: 'Boris', BDAY: '1985-04-16' }),
+    'c.vcf': vcard({ UID: 'u-c', FN: 'Clara', BDAY: '--0415' }, '4.0'),
+    'd.vcf': vcard({ UID: 'u-d', FN: 'Dora', BDAY: '--04-17' }, '4.0'),
+    'e.vcf': vcard({ UID: 'u-e', FN: 'Emil', BDAY: '16040415' }),
+    'f.vcf': vcard(
+      { UID: 'u-f', FN: 'Fritz', 'ANNIVERSARY;VALUE=date': '2010-04-16' },
+      '4.0'
+    ),
+    'g.vcf': vcard({ UID: 'u-g', FN: 'Gerda', BDAY: '19960229' }),
+    'h.vcf': vcard({ UID: 'u-h', FN: 'Hugo' }),
+    'team.vcf': vcard({
+      UID: 'u-t',
+      FN: 'Team',
+      BDAY: '19000415',
+      'X-ADDRESSBOOKSERVER-KIND': 'group',
+    }),
+  };
+  async function openAt(date: Date): Promise<void> {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(date);
+    fake = new FakeCardDav({
+      books: [{ name: 'people', displayName: 'People', resources: people }],
+    });
+    fake.install();
+    session = await connect({});
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('answers "today" from the clock, in every spelling a date comes in', async () => {
+    await openAt(new Date(2026, 3, 15, 9, 30));
+    const data = dataOf(await call(session, 'upcoming_dates', { days: 1 }));
+    expect(data.today).toBe('2026-04-15');
+    expect(data.from).toBe('2026-04-15');
+    expect(data.to).toBe('2026-04-15');
+    expect(
+      events(data).map((event) => [event.formatted_name, event.years])
+    ).toEqual([
+      ['Anna', 36],
+      ['Clara', undefined],
+      // The placeholder year 1604 is not a birth year, and a group is not a person.
+      ['Emil', undefined],
+    ]);
+    expect(events(data)[1]?.year_known).toBe(false);
+    expect(events(data)[0]).toMatchObject({
+      kind: 'birthday',
+      days_until: 0,
+      year_known: true,
+      date: '2026-04-15',
+    });
+  });
+
+  it('covers the next seven days, sorted, with anniversaries and years', async () => {
+    await openAt(new Date(2026, 3, 15));
+    const data = dataOf(await call(session, 'upcoming_dates'));
+    expect(
+      events(data).map(
+        (event) => `${event.date} ${event.formatted_name} ${event.kind}`
+      )
+    ).toEqual([
+      '2026-04-15 Anna birthday',
+      '2026-04-15 Clara birthday',
+      '2026-04-15 Emil birthday',
+      '2026-04-16 Boris birthday',
+      '2026-04-16 Fritz anniversary',
+      '2026-04-17 Dora birthday',
+    ]);
+    const fritz = events(data).find(
+      (event) => event.formatted_name === 'Fritz'
+    );
+    expect(fritz?.years).toBe(16);
+    expect(data.total).toBe(6);
+    expect(data.matched_with).toBe('server-filter');
+  });
+
+  it('narrows to a kind', async () => {
+    await openAt(new Date(2026, 3, 15));
+    const data = dataOf(
+      await call(session, 'upcoming_dates', { kinds: ['anniversary'] })
+    );
+    expect(events(data).map((event) => event.formatted_name)).toEqual([
+      'Fritz',
+    ]);
+  });
+
+  it('wraps the year end and observes 29 February on the 28th', async () => {
+    await openAt(new Date(2027, 1, 20));
+    const data = dataOf(
+      await call(session, 'upcoming_dates', { from: '2027-02-25', days: 5 })
+    );
+    expect(events(data)).toHaveLength(1);
+    expect(events(data)[0]).toMatchObject({
+      formatted_name: 'Gerda',
+      date: '2027-02-28',
+      shifted_from: '02-29',
+      years: 31,
+      days_until: 8,
+    });
+  });
+
+  it('says so when nothing falls in the window', async () => {
+    await openAt(new Date(2026, 8, 1));
+    const data = dataOf(await call(session, 'upcoming_dates', { days: 3 }));
+    expect(data.count).toBe(0);
+    expect(JSON.stringify(data.notes)).toContain('No birthday or anniversary');
+  });
+
+  it('refuses a window it cannot read', async () => {
+    await openAt(new Date(2026, 3, 15));
+    const result = await call(session, 'upcoming_dates', { to: '2026-04-01' });
+    expect(textOf(result)).toContain('to must not be before from');
+  });
+
+  it('asks the server only for cards that have a date', async () => {
+    await openAt(new Date(2026, 3, 15));
+    const before = fake.requests.length;
+    await call(session, 'upcoming_dates');
+    const body = fake.requests
+      .slice(before)
+      .find((request) => request.method === 'REPORT')?.body;
+    expect(body).toContain('<C:prop-filter name="BDAY"/>');
+    expect(body).toContain('<C:prop-filter name="ANNIVERSARY"/>');
+    expect(body).toContain('<C:filter test="anyof">');
+  });
+});
+
+describe('upcoming_dates: the time zone', () => {
+  const zone = process.env.TZ;
+  afterEach(() => {
+    vi.useRealTimers();
+    if (zone === undefined) delete process.env.TZ;
+    else process.env.TZ = zone;
+  });
+
+  it.each([
+    ['Pacific/Auckland', '2026-04-15'],
+    ['America/Los_Angeles', '2026-04-14'],
+  ])('reads today in %s', async (tz, expected) => {
+    process.env.TZ = tz;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // 20:00 UTC on the 14th is already the 15th in Auckland, not in Los Angeles.
+    vi.setSystemTime(new Date('2026-04-14T20:00:00Z'));
+    fake = new FakeCardDav({ books: [{ name: 'p', resources: {} }] });
+    fake.install();
+    session = await connect({});
+    const data = dataOf(await call(session, 'upcoming_dates', { days: 1 }));
+    expect(data.today).toBe(expected);
+    expect(data.timezone).toBe(tz);
+  });
+});

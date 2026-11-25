@@ -27,6 +27,7 @@ export const READ_TOOLS = [
   'list_contacts',
   'list_groups',
   'search_contacts',
+  'upcoming_dates',
 ] as const;
 
 /** Registered unless `CARDDAV_READ_ONLY` is set. */
@@ -47,7 +48,7 @@ export const ALL_TOOLS: readonly string[] = [...READ_TOOLS, ...WRITE_TOOLS];
  * What `CARDDAV_ALLOW_TOOLS=essential` selects: find a person, read them, add
  * one, correct one.
  *
- * Six of seventeen. Left out on purpose: everything irreversible (both deletes,
+ * Six of eighteen. Left out on purpose: everything irreversible (both deletes,
  * moving a card between books), the whole group surface — which is a different
  * job from keeping contacts and carries the one genuine complication in this
  * server — `get_contact_photo` and `export_contacts`, which return payloads

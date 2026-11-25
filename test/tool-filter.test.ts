@@ -207,3 +207,23 @@ describe('a filtered-out tool', () => {
     );
   });
 });
+
+describe('upcoming_dates and the allow list', () => {
+  it('is registered by default, and only by name once a list is given', async () => {
+    expect(await names()).toContain('upcoming_dates');
+    expect(
+      await names({ allowTools: 'list_contacts,search_contacts' })
+    ).toEqual(['list_contacts', 'search_contacts']);
+    expect(await names({ allowTools: 'list_contacts,upcoming_dates' })).toEqual(
+      ['list_contacts', 'upcoming_dates']
+    );
+  });
+
+  it('is not part of the essential preset, so a deployment on it is unchanged', () => {
+    expect(ESSENTIAL_TOOLS).not.toContain('upcoming_dates');
+  });
+
+  it('survives read-only mode, being a read tool', async () => {
+    expect(await names({ readOnly: true })).toContain('upcoming_dates');
+  });
+});

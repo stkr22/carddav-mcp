@@ -25,9 +25,9 @@ address book: find a person, read their card in full, add and correct contacts,
 keep groups, and fetch a contact photo — against your own server, with no vendor
 API in between.
 
-Seventeen tools is the ceiling, not the floor: `CARDDAV_ALLOW_TOOLS=essential`
+Eighteen tools is the ceiling, not the floor: `CARDDAV_ALLOW_TOOLS=essential`
 registers a curated six instead, and a model picks the right tool far more
-reliably from six than from seventeen — see
+reliably from six than from eighteen — see
 [choosing which tools load](#choosing-which-tools-load).
 
 <picture>
@@ -114,7 +114,7 @@ inspector can list its tools; every call then fails with setup instructions.
 
 ### Choosing which tools load
 
-Seventeen tools is a lot of context on every request, and a model picks worse
+Eighteen tools is a lot of context on every request, and a model picks worse
 from a long list than from a short one.
 
 ```sh
@@ -202,7 +202,7 @@ decides which servers a connector sees, not which tools a server registers.
 **Address books** — `list_address_books`, `get_server_info`
 
 **Contacts** — `list_contacts`, `get_contact`, `search_contacts`,
-`get_contact_photo`, `export_contacts`, `list_changes`, `create_contact`,
+`upcoming_dates`, `get_contact_photo`, `export_contacts`, `list_changes`, `create_contact`,
 `update_contact` 👤, `delete_contact` 👤, `move_contact` 👤
 
 **Groups** — `list_groups`, `get_group`, `create_group`, `update_group` 👤,

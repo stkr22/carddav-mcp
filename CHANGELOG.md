@@ -42,6 +42,18 @@ value: "0415"}` finds 15 April whether the card says `19900415`, `1990-04-15`,
   `offset`. Search results are now sorted by name, as listings were, so a
   page boundary means something.
 
+- **`upcoming_dates`, a new read tool.** Birthdays and anniversaries inside a
+  window — `from` (default today) plus `days` (default 7, counting `from`) or
+  `to` — sorted by date, with the age or the years when the card states a
+  year. CardDAV has no date filter and a birthday is stored in four
+  spellings, so the server is only asked for cards that have the date and the
+  calendar arithmetic runs here: month and year ends, and 29 February, which
+  is observed on 28 February in a year without one (`shifted_from` says so).
+  The year 1604, which clients use for "no year", is not reported as a birth
+  year. Today is read in the process's `TZ`, which the answer names. The tool
+  is **not** part of the `essential` preset, and with `CARDDAV_ALLOW_TOOLS`
+  set it is registered only when named.
+
 ### Changed
 
 - **`query` is split into words and every word must match**, in any of the

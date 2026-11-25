@@ -1,6 +1,6 @@
 # Asking a person
 
-Five of the 17 tools do something that cannot be taken back — a CardDAV server
+Five of the 18 tools do something that cannot be taken back — a CardDAV server
 keeps no version history and has no trash, so an overwritten card is gone in the
 same sense a deleted one is. All five **ask a person first**.
 

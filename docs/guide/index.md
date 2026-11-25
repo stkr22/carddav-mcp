@@ -1,6 +1,6 @@
 # What is carddav-mcp?
 
-An MCP server that puts a CardDAV address book in front of a model: seventeen
+An MCP server that puts a CardDAV address book in front of a model: eighteen
 tools over contacts, groups and photos, on any server that speaks the standard.
 
 CardDAV ([RFC 6352](https://datatracker.ietf.org/doc/html/rfc6352)) is WebDAV
