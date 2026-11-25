@@ -25,9 +25,9 @@ address book: find a person, read their card in full, add and correct contacts,
 keep groups, and fetch a contact photo — against your own server, with no vendor
 API in between.
 
-Seventeen tools is the ceiling, not the floor: `CARDDAV_ALLOW_TOOLS=essential`
+Eighteen tools is the ceiling, not the floor: `CARDDAV_ALLOW_TOOLS=essential`
 registers a curated six instead, and a model picks the right tool far more
-reliably from six than from seventeen — see
+reliably from six than from eighteen — see
 [choosing which tools load](#choosing-which-tools-load).
 
 <picture>
@@ -114,7 +114,7 @@ inspector can list its tools; every call then fails with setup instructions.
 
 ### Choosing which tools load
 
-Seventeen tools is a lot of context on every request, and a model picks worse
+Eighteen tools is a lot of context on every request, and a model picks worse
 from a long list than from a short one.
 
 ```sh
@@ -182,6 +182,24 @@ docker run --rm -i \
   ghcr.io/ni-c/carddav-mcp
 ```
 
+### Streamable HTTP image (fork)
+
+The default build target of the `Dockerfile` serves the stdio server over
+Streamable HTTP on port 8000 through [supergateway](https://github.com/supercorp-ai/supergateway);
+`--target runtime` builds the plain stdio image above.
+
+The endpoint needs a bearer token:
+
+| Variable            | Description                                                                                                                                     |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MCP_API_KEYS`      | One or more tokens, comma-separated. Clients send `Authorization: Bearer <token>` to `/mcp`; anything else gets 401. Compared in constant time. |
+| `MCP_ALLOW_NO_AUTH` | `true` lets the container start without `MCP_API_KEYS`. Without either it refuses to start. Default unset.                                      |
+
+`/healthz` stays open for probes. The tokens are removed from the environment
+the stdio server inherits and are never logged; they are visible in the
+container's process arguments, so a network policy in front is still worth
+having.
+
 ### Through mcp-hub
 
 A client that cannot spawn a local process — ChatGPT connectors, Claude on the
@@ -202,7 +220,7 @@ decides which servers a connector sees, not which tools a server registers.
 **Address books** — `list_address_books`, `get_server_info`
 
 **Contacts** — `list_contacts`, `get_contact`, `search_contacts`,
-`get_contact_photo`, `export_contacts`, `list_changes`, `create_contact`,
+`upcoming_dates`, `get_contact_photo`, `export_contacts`, `list_changes`, `create_contact`,
 `update_contact` 👤, `delete_contact` 👤, `move_contact` 👤
 
 **Groups** — `list_groups`, `get_group`, `create_group`, `update_group` 👤,

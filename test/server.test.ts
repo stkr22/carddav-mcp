@@ -773,3 +773,418 @@ describe('the server introduces itself', () => {
     expect(SERVER_INFO.icons[0]?.mimeType).toBe('image/png');
   });
 });
+
+describe('search_contacts: a field the summary does not carry', () => {
+  it('finds a contact by a note, which a listing never fetches', async () => {
+    // The re-check runs against the card as retrieved. A property that is
+    // searchable but not retrieved made every match on it look like a false
+    // positive, and the local pass dropped it.
+    await open();
+    const data = dataOf(
+      await call(session, 'search_contacts', {
+        query: 'programmer',
+        fields: ['NOTE'],
+      })
+    );
+    expect(data.count).toBe(1);
+  });
+});
+
+const reportBodies = (since: number): string[] =>
+  fake.requests
+    .slice(since)
+    .filter((request) => request.method === 'REPORT')
+    .map((request) => request.body ?? '');
+
+describe('search_contacts: where', () => {
+  it('refuses a call with neither query nor where', async () => {
+    await open();
+    const result = await call(session, 'search_contacts', {});
+    expect(textOf(result)).toContain('pass query, where, or both');
+  });
+
+  it('sends all as an allof filter and answers from the server', async () => {
+    await open();
+    const before = fake.requests.length;
+    const data = dataOf(
+      await call(session, 'search_contacts', {
+        where: {
+          all: [
+            { field: 'TITLE', op: 'starts_with', value: 'math' },
+            { field: 'NOTE', op: 'exists' },
+          ],
+        },
+      })
+    );
+    expect(data.count).toBe(1);
+    expect(data.matched_with).toBe('server-filter');
+    const [body] = reportBodies(before);
+    expect(body).toContain('<C:filter test="allof">');
+    expect(body).toContain('match-type="starts-with">math</C:text-match>');
+    expect(body).toContain('<C:prop-filter name="NOTE"/>');
+  });
+
+  it('finds a contact by birthday however the date is written, listing the book', async () => {
+    await open();
+    fake.seed(
+      'work',
+      'x.vcf',
+      vcard({ UID: 'u-x', FN: 'Xena', BDAY: '19901209' })
+    );
+    // GRACE is --1209 in the private book, Xena 19901209 in work: one query.
+    const before = fake.requests.length;
+    const data = dataOf(
+      await call(session, 'search_contacts', {
+        where: { all: [{ field: 'BDAY', op: 'contains', value: '1209' }] },
+      })
+    );
+    expect(data.count).toBe(2);
+    expect(data.matched_with).toBe('client-filter');
+    expect(
+      reportBodies(before).every((body) => !body.includes('prop-filter'))
+    ).toBe(true);
+  });
+
+  it('excludes with none, evaluated here', async () => {
+    await open();
+    const data = dataOf(
+      await call(session, 'search_contacts', {
+        where: { none: [{ field: 'EMAIL', op: 'contains', value: 'ada@' }] },
+      })
+    );
+    const names = (data.contacts as Record<string, unknown>[]).map(
+      (contact) => contact.formatted_name
+    );
+    expect(names).toContain('Grace Hopper');
+    expect(names).not.toContain('Ada Lovelace');
+  });
+
+  it('narrows a multi-word query on the server and finishes it here', async () => {
+    await open();
+    const data = dataOf(
+      await call(session, 'search_contacts', { query: 'grace navy' })
+    );
+    expect(data.matched_with).toBe('server-prefilter');
+    expect(data.count).toBe(1);
+    const none = dataOf(
+      await call(session, 'search_contacts', { query: 'grace lovelace' })
+    );
+    expect(none.count).toBe(0);
+  });
+
+  it('finds a card stored surname first by the name in the other order', async () => {
+    await open();
+    fake.seed(
+      'work',
+      'laura.vcf',
+      vcard({ UID: 'u-l', FN: 'Meier Laura', N: 'Meier;Laura;;;' })
+    );
+    const data = dataOf(
+      await call(session, 'search_contacts', { query: 'Laura Meier' })
+    );
+    expect(data.count).toBe(1);
+  });
+
+  it('refuses a field name that is not a vCard property', async () => {
+    await open();
+    const result = await call(session, 'search_contacts', {
+      where: { all: [{ field: 'FN"/><C:x', op: 'exists' }] },
+    });
+    expect(JSON.stringify(result)).toMatch(/invalid|Invalid/);
+    const reports = fake.requests.filter(
+      (request) => request.method === 'REPORT'
+    );
+    expect(
+      reports.every((request) => !(request.body ?? '').includes('<C:x'))
+    ).toBe(true);
+  });
+
+  it('falls back to listing when the server cannot filter, for a where too', async () => {
+    await open({ refuseFiltering: true });
+    const data = dataOf(
+      await call(session, 'search_contacts', {
+        where: { all: [{ field: 'ORG', op: 'equals', value: 'Navy' }] },
+      })
+    );
+    expect(data.matched_with).toBe('client-filter');
+    expect(data.count).toBe(1);
+  });
+});
+
+const named = (data: Record<string, unknown>) =>
+  (data.contacts as Record<string, unknown>[]).find(
+    (contact) => contact.formatted_name === 'Wide Card'
+  );
+
+describe('listings: birthday, include and paging', () => {
+  const WIDE = vcard({
+    UID: 'u-wide',
+    FN: 'Wide Card',
+    'URL;TYPE=WORK': 'https://wide.example.net/',
+    'IMPP;X-SERVICE-TYPE=matrix': 'matrix:@wide:example.net',
+    'ADR;TYPE=HOME': ';;1 Main Street;Berlin;;10115;Germany',
+    'ANNIVERSARY;VALUE=date': '2010-06-01',
+  });
+  it('shows the birthday and anniversary without being asked', async () => {
+    await open();
+    fake.seed('work', 'wide.vcf', WIDE);
+    const listed = dataOf(await call(session, 'list_contacts'));
+    const ada = (listed.contacts as Record<string, unknown>[]).find(
+      (contact) => contact.formatted_name === 'Ada Lovelace'
+    );
+    expect(ada?.birthday).toMatchObject({ year: 1815, month: 12, day: 10 });
+    expect(named(listed)?.anniversary).toMatchObject({ year: 2010, month: 6 });
+    // Wider fields are opt-in: a listing stays cheap by default.
+    expect(named(listed)).not.toHaveProperty('urls');
+    expect(named(listed)).not.toHaveProperty('addresses');
+  });
+
+  it('adds only what include names', async () => {
+    await open();
+    fake.seed('work', 'wide.vcf', WIDE);
+    const before = fake.requests.length;
+    const listed = dataOf(
+      await call(session, 'list_contacts', { include: ['urls'] })
+    );
+    expect(named(listed)?.urls).toEqual([
+      { value: 'https://wide.example.net/', types: ['work'], preferred: false },
+    ]);
+    expect(named(listed)).not.toHaveProperty('addresses');
+    const body = fake.requests
+      .slice(before)
+      .find((request) => request.method === 'REPORT')?.body;
+    expect(body).toContain('<C:prop name="URL"/>');
+    expect(body).not.toContain('<C:prop name="ADR"/>');
+  });
+
+  it('adds everything with all, on search as well', async () => {
+    await open();
+    fake.seed('work', 'wide.vcf', WIDE);
+    const found = dataOf(
+      await call(session, 'search_contacts', {
+        query: 'wide',
+        include: ['all'],
+      })
+    );
+    const wide = named(found);
+    expect(wide?.urls).toBeDefined();
+    expect(wide?.addresses).toBeDefined();
+    expect(wide?.instant_messaging).toBeDefined();
+  });
+
+  it('finds a contact by url, which the summary now carries', async () => {
+    await open();
+    fake.seed('work', 'wide.vcf', WIDE);
+    const found = dataOf(
+      await call(session, 'search_contacts', {
+        where: {
+          all: [{ field: 'URL', op: 'contains', value: 'wide.example' }],
+        },
+      })
+    );
+    expect(found.count).toBe(1);
+  });
+
+  it('pages with offset and reports the total', async () => {
+    await open();
+    for (const name of ['Aaa', 'Bbb', 'Ccc', 'Ddd', 'Eee']) {
+      fake.seed('shared', `${name}.vcf`, vcard({ UID: `u-${name}`, FN: name }));
+    }
+    const first = dataOf(
+      await call(session, 'list_contacts', {
+        address_books: ['shared'],
+        limit: 2,
+      })
+    );
+    expect(first.total).toBe(5);
+    expect(
+      (first.contacts as Record<string, unknown>[]).map((c) => c.formatted_name)
+    ).toEqual(['Aaa', 'Bbb']);
+    expect(JSON.stringify(first.notes)).toContain('offset=2');
+
+    const second = dataOf(
+      await call(session, 'list_contacts', {
+        address_books: ['shared'],
+        limit: 2,
+        offset: 2,
+      })
+    );
+    expect(
+      (second.contacts as Record<string, unknown>[]).map(
+        (c) => c.formatted_name
+      )
+    ).toEqual(['Ccc', 'Ddd']);
+    expect(JSON.stringify(second.notes)).toContain('1 more entry');
+
+    const last = dataOf(
+      await call(session, 'search_contacts', {
+        where: { all: [{ field: 'UID', op: 'starts_with', value: 'u-' }] },
+        address_books: ['shared'],
+        limit: 2,
+        offset: 4,
+      })
+    );
+    expect(last.total).toBe(5);
+    expect(last.count).toBe(1);
+    expect(last.notes).toBeUndefined();
+  });
+});
+
+const events = (data: Record<string, unknown>) =>
+  data.events as Record<string, unknown>[];
+
+describe('upcoming_dates', () => {
+  const people = {
+    'a.vcf': vcard({ UID: 'u-a', FN: 'Anna', BDAY: '19900415' }),
+    'b.vcf': vcard({ UID: 'u-b', FN: 'Boris', BDAY: '1985-04-16' }),
+    'c.vcf': vcard({ UID: 'u-c', FN: 'Clara', BDAY: '--0415' }, '4.0'),
+    'd.vcf': vcard({ UID: 'u-d', FN: 'Dora', BDAY: '--04-17' }, '4.0'),
+    'e.vcf': vcard({ UID: 'u-e', FN: 'Emil', BDAY: '16040415' }),
+    'f.vcf': vcard(
+      { UID: 'u-f', FN: 'Fritz', 'ANNIVERSARY;VALUE=date': '2010-04-16' },
+      '4.0'
+    ),
+    'g.vcf': vcard({ UID: 'u-g', FN: 'Gerda', BDAY: '19960229' }),
+    'h.vcf': vcard({ UID: 'u-h', FN: 'Hugo' }),
+    'team.vcf': vcard({
+      UID: 'u-t',
+      FN: 'Team',
+      BDAY: '19000415',
+      'X-ADDRESSBOOKSERVER-KIND': 'group',
+    }),
+  };
+  async function openAt(date: Date): Promise<void> {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(date);
+    fake = new FakeCardDav({
+      books: [{ name: 'people', displayName: 'People', resources: people }],
+    });
+    fake.install();
+    session = await connect({});
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('answers "today" from the clock, in every spelling a date comes in', async () => {
+    await openAt(new Date(2026, 3, 15, 9, 30));
+    const data = dataOf(await call(session, 'upcoming_dates', { days: 1 }));
+    expect(data.today).toBe('2026-04-15');
+    expect(data.from).toBe('2026-04-15');
+    expect(data.to).toBe('2026-04-15');
+    expect(
+      events(data).map((event) => [event.formatted_name, event.years])
+    ).toEqual([
+      ['Anna', 36],
+      ['Clara', undefined],
+      // The placeholder year 1604 is not a birth year, and a group is not a person.
+      ['Emil', undefined],
+    ]);
+    expect(events(data)[1]?.year_known).toBe(false);
+    expect(events(data)[0]).toMatchObject({
+      kind: 'birthday',
+      days_until: 0,
+      year_known: true,
+      date: '2026-04-15',
+    });
+  });
+
+  it('covers the next seven days, sorted, with anniversaries and years', async () => {
+    await openAt(new Date(2026, 3, 15));
+    const data = dataOf(await call(session, 'upcoming_dates'));
+    expect(
+      events(data).map(
+        (event) => `${event.date} ${event.formatted_name} ${event.kind}`
+      )
+    ).toEqual([
+      '2026-04-15 Anna birthday',
+      '2026-04-15 Clara birthday',
+      '2026-04-15 Emil birthday',
+      '2026-04-16 Boris birthday',
+      '2026-04-16 Fritz anniversary',
+      '2026-04-17 Dora birthday',
+    ]);
+    const fritz = events(data).find(
+      (event) => event.formatted_name === 'Fritz'
+    );
+    expect(fritz?.years).toBe(16);
+    expect(data.total).toBe(6);
+    expect(data.matched_with).toBe('server-filter');
+  });
+
+  it('narrows to a kind', async () => {
+    await openAt(new Date(2026, 3, 15));
+    const data = dataOf(
+      await call(session, 'upcoming_dates', { kinds: ['anniversary'] })
+    );
+    expect(events(data).map((event) => event.formatted_name)).toEqual([
+      'Fritz',
+    ]);
+  });
+
+  it('wraps the year end and observes 29 February on the 28th', async () => {
+    await openAt(new Date(2027, 1, 20));
+    const data = dataOf(
+      await call(session, 'upcoming_dates', { from: '2027-02-25', days: 5 })
+    );
+    expect(events(data)).toHaveLength(1);
+    expect(events(data)[0]).toMatchObject({
+      formatted_name: 'Gerda',
+      date: '2027-02-28',
+      shifted_from: '02-29',
+      years: 31,
+      days_until: 8,
+    });
+  });
+
+  it('says so when nothing falls in the window', async () => {
+    await openAt(new Date(2026, 8, 1));
+    const data = dataOf(await call(session, 'upcoming_dates', { days: 3 }));
+    expect(data.count).toBe(0);
+    expect(JSON.stringify(data.notes)).toContain('No birthday or anniversary');
+  });
+
+  it('refuses a window it cannot read', async () => {
+    await openAt(new Date(2026, 3, 15));
+    const result = await call(session, 'upcoming_dates', { to: '2026-04-01' });
+    expect(textOf(result)).toContain('to must not be before from');
+  });
+
+  it('asks the server only for cards that have a date', async () => {
+    await openAt(new Date(2026, 3, 15));
+    const before = fake.requests.length;
+    await call(session, 'upcoming_dates');
+    const body = fake.requests
+      .slice(before)
+      .find((request) => request.method === 'REPORT')?.body;
+    expect(body).toContain('<C:prop-filter name="BDAY"/>');
+    expect(body).toContain('<C:prop-filter name="ANNIVERSARY"/>');
+    expect(body).toContain('<C:filter test="anyof">');
+  });
+});
+
+describe('upcoming_dates: the time zone', () => {
+  const zone = process.env.TZ;
+  afterEach(() => {
+    vi.useRealTimers();
+    if (zone === undefined) delete process.env.TZ;
+    else process.env.TZ = zone;
+  });
+
+  it.each([
+    ['Pacific/Auckland', '2026-04-15'],
+    ['America/Los_Angeles', '2026-04-14'],
+  ])('reads today in %s', async (tz, expected) => {
+    process.env.TZ = tz;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // 20:00 UTC on the 14th is already the 15th in Auckland, not in Los Angeles.
+    vi.setSystemTime(new Date('2026-04-14T20:00:00Z'));
+    fake = new FakeCardDav({ books: [{ name: 'p', resources: {} }] });
+    fake.install();
+    session = await connect({});
+    const data = dataOf(await call(session, 'upcoming_dates', { days: 1 }));
+    expect(data.today).toBe(expected);
+    expect(data.timezone).toBe(tz);
+  });
+});

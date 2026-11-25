@@ -48,6 +48,12 @@ The URL is probably not a CardDAV endpoint. For Baikal it usually has to end in
 `get_server_info` reports whether server-side search works at all on this
 instance — it probes rather than trusting what the server advertises.
 
+A search by words (`query`) needs every word to match; a card that stores the
+name surname-first still matches. For anything exact — a title, a URL, a
+birthday, "has no email" — use `where`. A date is compared as digits, so it
+matches however the client wrote it, but it can never be narrowed on the
+server: that search lists the address book and says `client-filter`.
+
 Where the server cannot filter, this server fetches the collection and matches
 locally instead, and the answer says `matched_with: "client-filter"` so a slow
 search has a visible reason. Where the server *can* filter, the result is still

@@ -1,0 +1,32 @@
+# podman-compose puts all services in one pod by default, which conflicts with
+# `userns_mode: keep-id` on the dev service ("--userns and --pod cannot be set
+# together"). Services still reach each other by name via the compose network.
+x-podman:
+  in_pod: false
+
+services:
+  app:
+    image: mcr.microsoft.com/devcontainers/typescript-node:26
+    command: sleep infinity
+    userns_mode: 'keep-id' # Podman: keeps your host UID
+    working_dir: /workspaces/carddav-mcp
+    volumes:
+      - ..:/workspaces/carddav-mcp:cached
+
+  # Radicale for `npm run test:integration`, sharing the dev container's network
+  # namespace on purpose: the suite insists on a loopback backend
+  # (`assertLoopback`) and addresses it as http://127.0.0.1:5232, which a
+  # separate compose network would not give it. State is in memory, so every
+  # start is empty.
+  #
+  # Baikal is not here: its bootstrap seeds the account with
+  # `docker compose exec`, which a dev container has no way to run. Run that
+  # suite from the host with test/integration/compose.yml.
+  radicale:
+    image: ${RADICALE_IMAGE:-docker.io/tomsquest/docker-radicale:3.8.0.0}
+    network_mode: 'service:app'
+    volumes:
+      - ../test/integration/radicale/config:/etc/radicale/config:ro
+      - ../test/integration/radicale/users:/etc/radicale/users:ro
+    tmpfs:
+      - /data

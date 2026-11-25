@@ -50,7 +50,7 @@
 
     <rect class="node-accent" x="280" y="60" width="170" height="100" rx="10" />
     <text class="label-title" x="365" y="95" text-anchor="middle">carddav-mcp</text>
-    <text class="label-muted" x="365" y="115" text-anchor="middle">17 tools</text>
+    <text class="label-muted" x="365" y="115" text-anchor="middle">18 tools</text>
     <text class="label-muted" x="365" y="133" text-anchor="middle">asks a person</text>
 
     <!-- Two lines rather than one: "Radicale, Baikal, Nextcloud, …" is about

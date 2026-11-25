@@ -59,8 +59,14 @@ ENTRYPOINT ["node", "dist/index.js"]
 # Fork addition (stkr22): Streamable HTTP for in-cluster use. The server only
 # speaks stdio, so supergateway serves it on :8000/mcp. This is the last stage,
 # so it is the default build target; `--target runtime` gives the stdio image.
-# docker/mcp-http/package-lock.json pins the gateway's full dependency tree.
-# The gateway has no auth of its own: the network policy in front is the boundary.
+# docker/mcp-http/package-lock.json pins the gateway's full dependency tree. It
+# overrides zod to 4.x: supergateway still asks for 3.x, which is inside the range
+# of a high advisory (GHSA-mrhx-c7xc-m3w5) that has no 3.x fix, and the gateway
+# runs fine on 4.x (initialize and tools/list checked through it).
+# Inbound auth: docker/mcp-http/entrypoint.sh turns MCP_API_KEYS (comma-separated)
+# into supergateway's --apiKey flags and refuses to start without one unless
+# MCP_ALLOW_NO_AUTH=true. Clients send `Authorization: Bearer <key>`; /healthz stays
+# open for the probes. The network policy in front is still worth having.
 # ---------------------------------------------------------------------------
 FROM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS gateway
 WORKDIR /gateway
@@ -69,9 +75,7 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 FROM runtime AS http
 COPY --from=gateway /gateway /gateway
+COPY --chmod=0555 docker/mcp-http/entrypoint.sh /gateway/entrypoint.sh
 USER node
 EXPOSE 8000
-ENTRYPOINT ["/gateway/node_modules/.bin/supergateway", \
-    "--stdio", "node /app/dist/index.js", \
-    "--outputTransport", "streamableHttp", "--stateful", "--sessionTimeout", "900000", \
-    "--port", "8000", "--healthEndpoint", "/healthz"]
+ENTRYPOINT ["/gateway/entrypoint.sh"]

@@ -85,6 +85,9 @@ describe('the connection', () => {
   });
 });
 
+const where = async (conditions: Record<string, unknown>) =>
+  data(await asking.call('search_contacts', { where: conditions }));
+
 describe('contacts', () => {
   let adaId = '';
 
@@ -162,6 +165,88 @@ describe('contacts', () => {
       expect(answer.count, query).toBe(1);
       expect(answer.matched_with, query).toBe('server-filter');
     }
+  });
+
+  it('filters on named properties, with the operators CardDAV has', async () => {
+    // allof, with a starts-with and an exists in one request.
+    const all = await where({
+      all: [
+        { field: 'TITLE', op: 'starts_with', value: 'math' },
+        { field: 'NOTE', op: 'exists' },
+      ],
+    });
+    expect(all.count).toBe(1);
+    expect(all.matched_with).toBe('server-filter');
+
+    // anyof, and a condition that cannot match.
+    const any = await where({
+      any: [
+        { field: 'TITLE', op: 'equals', value: 'nobody' },
+        { field: 'EMAIL', op: 'ends_with', value: 'example.net' },
+      ],
+    });
+    expect(any.count).toBe(1);
+
+    // is-not-defined, and its opposite.
+    expect(
+      (await where({ all: [{ field: 'URL', op: 'missing' }] })).count
+    ).toBe(1);
+    expect((await where({ all: [{ field: 'URL', op: 'exists' }] })).count).toBe(
+      0
+    );
+    expect(
+      (await where({ all: [{ field: 'NOTE', op: 'missing' }] })).count
+    ).toBe(0);
+
+    // A negation is evaluated here, whatever the server would have said.
+    const none = await where({
+      none: [{ field: 'TITLE', op: 'contains', value: 'math' }],
+    });
+    expect(none.count).toBe(0);
+    expect(none.matched_with).toBe('client-filter');
+  });
+
+  it('finds a birthday by digits, whichever way the card spells it', async () => {
+    const answer = data(
+      await asking.call('search_contacts', {
+        where: { all: [{ field: 'BDAY', op: 'contains', value: '1210' }] },
+      })
+    );
+    expect(answer.count).toBe(1);
+    expect(answer.matched_with).toBe('client-filter');
+    const [contact] = answer.contacts as Record<string, unknown>[];
+    expect(contact?.birthday).toMatchObject({ month: 12, day: 10 });
+  });
+
+  it('reports the birthday in a listing, and the extras only when asked', async () => {
+    const narrow = data(await asking.call('list_contacts'));
+    const [contact] = narrow.contacts as Record<string, unknown>[];
+    expect(contact?.birthday).toMatchObject({ year: 1815, month: 12, day: 10 });
+    expect(contact?.addresses).toBeUndefined();
+    const wide = data(
+      await asking.call('list_contacts', { include: ['addresses'] })
+    );
+    const [withAddress] = wide.contacts as Record<string, unknown>[];
+    expect(withAddress?.addresses).toHaveLength(1);
+    expect(wide.total).toBe(1);
+  });
+
+  it('lists the birthdays in a window', async () => {
+    const answer = data(
+      await asking.call('upcoming_dates', { from: '2026-12-08', days: 5 })
+    );
+    expect(answer.count).toBe(1);
+    const [event] = answer.events as Record<string, unknown>[];
+    expect(event).toMatchObject({
+      date: '2026-12-10',
+      kind: 'birthday',
+      years: 211,
+      formatted_name: 'Ada Lovelace',
+    });
+    const none = data(
+      await asking.call('upcoming_dates', { from: '2026-06-01', days: 7 })
+    );
+    expect(none.count).toBe(0);
   });
 
   it('changes a field and keeps everything else', async () => {

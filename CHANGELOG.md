@@ -13,9 +13,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`search_contacts` takes a `where` filter.** Conditions are
+  `{field, op, value}` with `op` one of `contains`, `equals`, `starts_with`,
+  `ends_with`, `exists` or `missing`, grouped as `all` (every one), `any` (at
+  least one) and `none` (no one). Any property the server names can be used —
+  `BDAY`, `ANNIVERSARY`, `URL`, `IMPP`, `TITLE`, `NOTE`, `ROLE` … — where the
+  old `fields` list stopped at ten. `query` and `where` can be combined.
+  What the wire format can say is sent to the server (`allof` or `anyof`
+  filters, `is-not-defined`, `match-type`); a negation or a date comparison
+  is not, and `matched_with` reports `server-prefilter` or `client-filter`
+  for those. Whatever comes back is always checked again here.
+- **A date is compared as digits.** `{field: "BDAY", op: "contains",
+value: "0415"}` finds 15 April whether the card says `19900415`, `1990-04-15`,
+  `--0415` or `--04-15`. Dates are never sent to the server as text, because
+  the stored spelling differs between clients.
+
+- **`list_contacts` and `search_contacts` show the birthday and the
+  anniversary.** They were only visible through `get_contact`, so finding a
+  birthday meant fetching every card. Both are small, so they are always
+  there.
+- **`include` on `list_contacts` and `search_contacts`** adds `urls`,
+  `addresses`, `impp` or `all` per contact, and retrieves only those from the
+  server. Left out, a listing stays as narrow as before.
+- **`offset` on both**, so the next page is a call instead of a larger
+  `limit`, and **`total`** in the answer: how many matched before `limit` and
+  `offset`. Search results are now sorted by name, as listings were, so a
+  page boundary means something.
+
+- **`upcoming_dates`, a new read tool.** Birthdays and anniversaries inside a
+  window — `from` (default today) plus `days` (default 7, counting `from`) or
+  `to` — sorted by date, with the age or the years when the card states a
+  year. CardDAV has no date filter and a birthday is stored in four
+  spellings, so the server is only asked for cards that have the date and the
+  calendar arithmetic runs here: month and year ends, and 29 February, which
+  is observed on 28 February in a year without one (`shifted_from` says so).
+  The year 1604, which clients use for "no year", is not reported as a birth
+  year. Today is read in the process's `TZ`, which the answer names. The tool
+  is **not** part of the `essential` preset, and with `CARDDAV_ALLOW_TOOLS`
+  set it is registered only when named.
+
+- **The Streamable HTTP image requires a bearer token.** `MCP_API_KEYS` takes
+  one or more comma-separated tokens; `/mcp` answers 401 without
+  `Authorization: Bearer <token>`, and `/healthz` stays open for the probes.
+  The container refuses to start without the variable unless
+  `MCP_ALLOW_NO_AUTH=true`, so it cannot run open by accident. This is a
+  breaking change for a deployment of this image that relied on the network
+  policy alone: set `MCP_API_KEYS`, or the opt-out, before upgrading.
+
 ### Changed
 
+- **`query` is split into words and every word must match**, in any of the
+  searched fields, so "Laura Meier" finds a card stored as "Meier Laura".
+  Every card a phrase matched still matches. `query` is now optional when
+  `where` is given.
+- `matched_with` can also be `server-prefilter`.
+- The HTTP image's gateway moves to supergateway 4.3.0 with zod overridden to
+  4.x, which clears the high-severity advisories in the pinned 4.2.1 tree
+  (MCP SDK request limits and message routing, zod memory exhaustion) that
+  failed the container scan. Development dependencies are brought up to date.
+- The truncation note names the `offset` of the next page.
 - Require Node.js 24 or newer. CI tests the latest 24 and 26 LTS releases; Node 22 is no longer supported.
+
+### Fixed
+
+- **A match on a property the listing does not fetch is no longer dropped.**
+  `search_contacts` accepted `NOTE` and `ROLE` but re-checked results against a
+  card that did not carry them, so the local pass discarded every server match
+  on them. The search now retrieves the properties it searches on.
 
 ## [0.1.4] - 2026-10-22
 

@@ -164,6 +164,20 @@ export const shapedContact = z
     emails: z.array(typedValue).optional(),
     phones: z.array(typedValue).optional(),
     categories: z.array(z.string()).optional(),
+    birthday: partialDate.optional(),
+    anniversary: partialDate.optional(),
+    addresses: z
+      .array(postalAddress)
+      .optional()
+      .describe('Only when asked for with include.'),
+    urls: z
+      .array(typedValue)
+      .optional()
+      .describe('Only when asked for with include.'),
+    instant_messaging: z
+      .array(typedValue)
+      .optional()
+      .describe('Only when asked for with include.'),
     photo: photo.optional(),
     is_group: z.boolean().optional(),
     member_count: z.number().optional(),
@@ -182,11 +196,6 @@ export const shapedContact = z
 /** The whole card, as `get_contact` returns it. */
 export const fullContact = shapedContact
   .extend({
-    addresses: z.array(postalAddress).optional(),
-    urls: z.array(typedValue).optional(),
-    instant_messaging: z.array(typedValue).optional(),
-    birthday: partialDate.optional(),
-    anniversary: partialDate.optional(),
     note: z.string().optional(),
     other_properties: z
       .array(z.string())

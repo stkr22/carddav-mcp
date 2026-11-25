@@ -91,7 +91,7 @@ server refuses to provide.
 
 ## Choosing the tools that load
 
-Seventeen tools is a lot of context on every request, and a model picks worse
+Eighteen tools is a lot of context on every request, and a model picks worse
 from a long list than from a short one. Two variables narrow it:
 
 ```sh

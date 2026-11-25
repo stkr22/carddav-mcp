@@ -1,6 +1,7 @@
 import { assess, sanitizeShortText, sanitizeText } from './analyze.js';
 import { isOpaqueToken } from './api.js';
 import type { AddressBookEntry } from './books.js';
+import type { VCardProp } from './dav-xml.js';
 import { buildEntityId } from './entity-id.js';
 import { redactUrlCredentials } from './redact.js';
 import {
@@ -114,6 +115,23 @@ function cleanList(values: readonly string[]): string[] {
   return values
     .map((value) => clean(value))
     .filter((value): value is string => value !== undefined);
+}
+
+/** Optional extras a listing may ask for. The birthday and anniversary are always there. */
+export const INCLUDES = ['urls', 'addresses', 'impp', 'all'] as const;
+export type Include = (typeof INCLUDES)[number];
+
+/** The properties a listing has to retrieve for the extras asked for. */
+export function includeProps(
+  include: readonly Include[] | undefined
+): VCardProp[] {
+  const wanted = new Set(include ?? []);
+  const all = wanted.has('all');
+  const props: VCardProp[] = [];
+  if (all || wanted.has('urls')) props.push('URL');
+  if (all || wanted.has('addresses')) props.push('ADR');
+  if (all || wanted.has('impp')) props.push('IMPP');
+  return props;
 }
 
 function shapeTyped(
@@ -258,6 +276,11 @@ function shapeCommon(
   const categories = cleanList(readList(card, 'categories'));
   if (categories.length > 0) out.categories = categories;
 
+  const birthday = cleanDate(readDate(card, 'bday'));
+  if (birthday !== undefined) out.birthday = birthday;
+  const anniversary = cleanDate(readDate(card, 'anniversary'));
+  if (anniversary !== undefined) out.anniversary = anniversary;
+
   if (info !== undefined) {
     const photo: Record<string, unknown> = { storage: info.storage };
     // `MEDIATYPE=` is a parameter the card author writes, so it is neither
@@ -295,11 +318,33 @@ export function shapeSummary(
   book: AddressBookEntry,
   resourceName: string,
   etag: string | undefined,
-  partial: boolean
+  partial: boolean,
+  include?: readonly Include[]
 ): Record<string, unknown> {
   const out = shapeCommon(card, book, resourceName, etag);
+  addExtras(out, card, includeProps(include));
   if (partial) out.partial = true;
   return out;
+}
+
+/** The wider properties, for a listing that asked and for the whole card. */
+function addExtras(
+  out: Record<string, unknown>,
+  card: ICAL.Component,
+  props: readonly VCardProp[]
+): void {
+  if (props.includes('ADR')) {
+    const addresses = shapeAddresses(card);
+    if (addresses.length > 0) out.addresses = addresses;
+  }
+  if (props.includes('URL')) {
+    const urls = shapeTyped(readTyped(card, 'url'), cleanUrl);
+    if (urls.length > 0) out.urls = urls;
+  }
+  if (props.includes('IMPP')) {
+    const impp = shapeTyped(readTyped(card, 'impp'), cleanUrl);
+    if (impp.length > 0) out.instant_messaging = impp;
+  }
 }
 
 /** The whole card, as `get_contact` returns it. */
@@ -311,17 +356,7 @@ export function shapeFull(
 ): Record<string, unknown> {
   const out = shapeCommon(card, book, resourceName, etag);
 
-  const addresses = shapeAddresses(card);
-  if (addresses.length > 0) out.addresses = addresses;
-  const urls = shapeTyped(readTyped(card, 'url'), cleanUrl);
-  if (urls.length > 0) out.urls = urls;
-  const impp = shapeTyped(readTyped(card, 'impp'), cleanUrl);
-  if (impp.length > 0) out.instant_messaging = impp;
-
-  const birthday = cleanDate(readDate(card, 'bday'));
-  if (birthday !== undefined) out.birthday = birthday;
-  const anniversary = cleanDate(readDate(card, 'anniversary'));
-  if (anniversary !== undefined) out.anniversary = anniversary;
+  addExtras(out, card, ['ADR', 'URL', 'IMPP']);
 
   const note = readText(card, 'note');
   if (note !== undefined) out.note = sanitizeText(note);

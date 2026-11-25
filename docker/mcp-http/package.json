@@ -2,6 +2,9 @@
   "name": "carddav-mcp-http-gateway",
   "private": true,
   "dependencies": {
-    "supergateway": "4.2.1"
+    "supergateway": "4.3.0"
+  },
+  "overrides": {
+    "zod": "^4.6.6"
   }
 }

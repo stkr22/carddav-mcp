@@ -1,0 +1,9 @@
+{
+  "features": {
+    "ghcr.io/stkr22/devcontainer-features/claude-code:4.1.0": {
+      "version": "4.1.0",
+      "resolved": "ghcr.io/stkr22/devcontainer-features/claude-code@sha256:fd7c0d6f7b8474fb8a16de857b1981c4d667fbdd496fa1557145b190126bc406",
+      "integrity": "sha256:fd7c0d6f7b8474fb8a16de857b1981c4d667fbdd496fa1557145b190126bc406"
+    }
+  }
+}
