@@ -30,6 +30,18 @@ value: "0415"}` finds 15 April whether the card says `19900415`, `1990-04-15`,
   `--0415` or `--04-15`. Dates are never sent to the server as text, because
   the stored spelling differs between clients.
 
+- **`list_contacts` and `search_contacts` show the birthday and the
+  anniversary.** They were only visible through `get_contact`, so finding a
+  birthday meant fetching every card. Both are small, so they are always
+  there.
+- **`include` on `list_contacts` and `search_contacts`** adds `urls`,
+  `addresses`, `impp` or `all` per contact, and retrieves only those from the
+  server. Left out, a listing stays as narrow as before.
+- **`offset` on both**, so the next page is a call instead of a larger
+  `limit`, and **`total`** in the answer: how many matched before `limit` and
+  `offset`. Search results are now sorted by name, as listings were, so a
+  page boundary means something.
+
 ### Changed
 
 - **`query` is split into words and every word must match**, in any of the
@@ -37,6 +49,7 @@ value: "0415"}` finds 15 April whether the card says `19900415`, `1990-04-15`,
   Every card a phrase matched still matches. `query` is now optional when
   `where` is given.
 - `matched_with` can also be `server-prefilter`.
+- The truncation note names the `offset` of the next page.
 - Require Node.js 24 or newer. CI tests the latest 24 and 26 LTS releases; Node 22 is no longer supported.
 
 ### Fixed

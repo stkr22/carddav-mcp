@@ -94,17 +94,21 @@ export async function resolveBooks(
  */
 export function applyLimit<T>(
   items: readonly T[],
-  limit: number
+  limit: number,
+  offset = 0
 ): { shown: T[]; dropped: number } {
-  if (items.length <= limit) return { shown: [...items], dropped: 0 };
-  return { shown: items.slice(0, limit), dropped: items.length - limit };
+  const shown = items.slice(offset, offset + limit);
+  // What lies beyond this page. Entries before the offset were skipped on the
+  // caller's say-so and are not "dropped".
+  const dropped = Math.max(0, items.length - offset - shown.length);
+  return { shown, dropped };
 }
 
 /** The note a truncated listing carries, naming what to do about it. */
-export function limitNote(dropped: number, limit: number): string {
+export function limitNote(dropped: number, limit: number, offset = 0): string {
   return (
     `${dropped} more entr${dropped === 1 ? 'y' : 'ies'} matched than the ` +
-    `limit of ${limit}. Raise limit, or narrow the request with ` +
-    'search_contacts.'
+    `limit of ${limit}. Raise limit, pass offset=${offset + limit} for the ` +
+    'next page, or narrow the request with search_contacts.'
   );
 }

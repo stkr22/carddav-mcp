@@ -33,12 +33,20 @@ import {
   run,
   untrustedResult,
 } from '../result.js';
-import { fencedTextOf, freeTextOf, shapeFull, shapeSummary } from '../shape.js';
+import {
+  fencedTextOf,
+  freeTextOf,
+  includeProps,
+  shapeFull,
+  shapeSummary,
+} from '../shape.js';
 import {
   addressBooksParam,
   addressBookRef,
   entityId,
+  includeParam,
   limitParam,
+  offsetParam,
   searchField,
 } from '../schema.js';
 import { MAX_MAX_ENTRIES } from '../config.js';
@@ -91,12 +99,16 @@ export function registerContactTools(
       title: 'List contacts',
       description:
         'Contacts in one or more address books, as short summaries: name, ' +
-        'organisation, addresses and phone numbers, and whether a photo is ' +
-        'present. Only the summary properties are fetched, so this stays ' +
-        'cheap on a large address book — get_contact returns the whole card.',
+        'organisation, title, email addresses, phone numbers, categories, ' +
+        'birthday, anniversary, and whether a photo is present. `include` ' +
+        'adds urls, addresses or messaging handles. Only these properties ' +
+        'are fetched, so this stays cheap on a large address book — ' +
+        'get_contact returns the whole card. Sorted by name; `offset` pages.',
       inputSchema: z.object({
         address_books: addressBooksParam,
         limit: limitParam,
+        offset: offsetParam,
+        include: includeParam,
         include_groups: z
           .boolean()
           .optional()
@@ -111,6 +123,12 @@ export function registerContactTools(
         ...untrustedFields,
         contacts: z.array(shapedContact),
         count: z.number().int(),
+        total: z
+          .number()
+          .int()
+          .describe(
+            'Contacts in these address books, before limit and offset.'
+          ),
         address_books: z.array(z.string()),
         notes,
       }),
@@ -123,7 +141,10 @@ export function registerContactTools(
           context.config.maxEntries,
           MAX_MAX_ENTRIES
         );
-        const documents = await listCards(context.api, books, SUMMARY_PROPS);
+        const documents = await listCards(context.api, books, [
+          ...SUMMARY_PROPS,
+          ...includeProps(args.include),
+        ]);
 
         const collected: string[] = [];
         let unreadable = 0;
@@ -143,7 +164,8 @@ export function registerContactTools(
               document.book,
               document.resourceName,
               document.etag,
-              true
+              true,
+              args.include
             );
           } catch {
             unreadable += 1;
@@ -161,8 +183,9 @@ export function registerContactTools(
             String(right.formatted_name ?? '')
           )
         );
-        const { shown, dropped } = applyLimit(shaped, limit);
-        if (dropped > 0) collected.push(limitNote(dropped, limit));
+        const offset = args.offset ?? 0;
+        const { shown, dropped } = applyLimit(shaped, limit, offset);
+        if (dropped > 0) collected.push(limitNote(dropped, limit, offset));
         if (unreadable > 0) {
           collected.push(
             `${unreadable} card(s) could not be parsed and were left out. ` +
@@ -184,6 +207,7 @@ export function registerContactTools(
         return untrustedResult({
           contacts: shown,
           count: shown.length,
+          total: shaped.length,
           address_books: books.map((book) => book.path),
           ...(collected.length > 0 ? { notes: collected } : {}),
         });
@@ -266,12 +290,18 @@ export function registerContactTools(
         where: whereSchema.optional(),
         address_books: addressBooksParam,
         limit: limitParam,
+        offset: offsetParam,
+        include: includeParam,
       }),
       annotations: READ_ONLY,
       outputSchema: z.object({
         ...untrustedFields,
         contacts: z.array(shapedContact),
         count: z.number().int(),
+        total: z
+          .number()
+          .int()
+          .describe('Contacts that matched, before limit and offset.'),
         matched_with: z
           .string()
           .describe(
@@ -308,7 +338,11 @@ export function registerContactTools(
         // listing does not fetch (NOTE, ROLE) made every match on it look like
         // a false positive.
         const retrieved = [
-          ...new Set<VCardProp>([...SUMMARY_PROPS, ...fieldsOf(filter)]),
+          ...new Set<VCardProp>([
+            ...SUMMARY_PROPS,
+            ...includeProps(args.include),
+            ...fieldsOf(filter),
+          ]),
         ];
         const outcome = await searchCards(
           context.api,
@@ -330,7 +364,8 @@ export function registerContactTools(
                 document.book,
                 document.resourceName,
                 document.etag,
-                true
+                true,
+                args.include
               )
             );
           } catch {
@@ -341,12 +376,14 @@ export function registerContactTools(
         }
 
         const collected = [...outcome.notes];
-        const { shown, dropped } = applyLimit(shaped, limit);
-        if (dropped > 0) collected.push(limitNote(dropped, limit));
+        const offset = args.offset ?? 0;
+        const { shown, dropped } = applyLimit(shaped, limit, offset);
+        if (dropped > 0) collected.push(limitNote(dropped, limit, offset));
 
         return untrustedResult({
           contacts: shown,
           count: shown.length,
+          total: shaped.length,
           matched_with: outcome.path,
           ...(outcome.collation === undefined
             ? {}

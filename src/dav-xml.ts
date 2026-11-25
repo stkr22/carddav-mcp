@@ -635,6 +635,8 @@ export const SUMMARY_PROPS: readonly VCardProp[] = [
   'ORG',
   'TITLE',
   'CATEGORIES',
+  'BDAY',
+  'ANNIVERSARY',
   'REV',
   'VERSION',
   'KIND',

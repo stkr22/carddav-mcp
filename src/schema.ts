@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { hasControlCharacters } from './analyze.js';
 import { MAX_MAX_ENTRIES } from './config.js';
 import { VCARD_PROPS } from './dav-xml.js';
+import { INCLUDES } from './shape.js';
 
 /**
  * Input schemas more than one tool uses.
@@ -78,6 +79,18 @@ export const limitParam = z
   .describe(
     'How many entries to return. Defaults to CARDDAV_MAX_CONTACTS, at most ' +
       `${MAX_MAX_ENTRIES}.`
+  );
+
+/** Where in a listing to start. */
+export const offsetParam = z
+  .number()
+  .int()
+  .min(0)
+  .max(100_000)
+  .optional()
+  .describe(
+    'Entries to skip, for the next page. Results are sorted by name, so ' +
+      'offset=limit continues where the previous call stopped.'
   );
 
 /** The confirmation token a guarded tool hands back on its first call. */
@@ -171,3 +184,14 @@ export const rawVCard = z
 
 /** vCard properties `search_contacts` will match against. */
 export const searchField = z.enum(VCARD_PROPS);
+
+/** Which extra properties a listing carries. */
+export const includeParam = z
+  .array(z.enum(INCLUDES))
+  .max(4)
+  .optional()
+  .describe(
+    'Extra properties per contact, which cost context: urls, addresses, ' +
+      'impp, or all. Names, organisation, title, emails, phones, categories, ' +
+      'birthday and anniversary are always there. get_contact has the rest.'
+  );

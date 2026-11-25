@@ -910,3 +910,122 @@ describe('search_contacts: where', () => {
     expect(data.count).toBe(1);
   });
 });
+
+const named = (data: Record<string, unknown>) =>
+  (data.contacts as Record<string, unknown>[]).find(
+    (contact) => contact.formatted_name === 'Wide Card'
+  );
+
+describe('listings: birthday, include and paging', () => {
+  const WIDE = vcard({
+    UID: 'u-wide',
+    FN: 'Wide Card',
+    'URL;TYPE=WORK': 'https://wide.example.net/',
+    'IMPP;X-SERVICE-TYPE=matrix': 'matrix:@wide:example.net',
+    'ADR;TYPE=HOME': ';;1 Main Street;Berlin;;10115;Germany',
+    'ANNIVERSARY;VALUE=date': '2010-06-01',
+  });
+  it('shows the birthday and anniversary without being asked', async () => {
+    await open();
+    fake.seed('work', 'wide.vcf', WIDE);
+    const listed = dataOf(await call(session, 'list_contacts'));
+    const ada = (listed.contacts as Record<string, unknown>[]).find(
+      (contact) => contact.formatted_name === 'Ada Lovelace'
+    );
+    expect(ada?.birthday).toMatchObject({ year: 1815, month: 12, day: 10 });
+    expect(named(listed)?.anniversary).toMatchObject({ year: 2010, month: 6 });
+    // Wider fields are opt-in: a listing stays cheap by default.
+    expect(named(listed)).not.toHaveProperty('urls');
+    expect(named(listed)).not.toHaveProperty('addresses');
+  });
+
+  it('adds only what include names', async () => {
+    await open();
+    fake.seed('work', 'wide.vcf', WIDE);
+    const before = fake.requests.length;
+    const listed = dataOf(
+      await call(session, 'list_contacts', { include: ['urls'] })
+    );
+    expect(named(listed)?.urls).toEqual([
+      { value: 'https://wide.example.net/', types: ['work'], preferred: false },
+    ]);
+    expect(named(listed)).not.toHaveProperty('addresses');
+    const body = fake.requests
+      .slice(before)
+      .find((request) => request.method === 'REPORT')?.body;
+    expect(body).toContain('<C:prop name="URL"/>');
+    expect(body).not.toContain('<C:prop name="ADR"/>');
+  });
+
+  it('adds everything with all, on search as well', async () => {
+    await open();
+    fake.seed('work', 'wide.vcf', WIDE);
+    const found = dataOf(
+      await call(session, 'search_contacts', {
+        query: 'wide',
+        include: ['all'],
+      })
+    );
+    const wide = named(found);
+    expect(wide?.urls).toBeDefined();
+    expect(wide?.addresses).toBeDefined();
+    expect(wide?.instant_messaging).toBeDefined();
+  });
+
+  it('finds a contact by url, which the summary now carries', async () => {
+    await open();
+    fake.seed('work', 'wide.vcf', WIDE);
+    const found = dataOf(
+      await call(session, 'search_contacts', {
+        where: {
+          all: [{ field: 'URL', op: 'contains', value: 'wide.example' }],
+        },
+      })
+    );
+    expect(found.count).toBe(1);
+  });
+
+  it('pages with offset and reports the total', async () => {
+    await open();
+    for (const name of ['Aaa', 'Bbb', 'Ccc', 'Ddd', 'Eee']) {
+      fake.seed('shared', `${name}.vcf`, vcard({ UID: `u-${name}`, FN: name }));
+    }
+    const first = dataOf(
+      await call(session, 'list_contacts', {
+        address_books: ['shared'],
+        limit: 2,
+      })
+    );
+    expect(first.total).toBe(5);
+    expect(
+      (first.contacts as Record<string, unknown>[]).map((c) => c.formatted_name)
+    ).toEqual(['Aaa', 'Bbb']);
+    expect(JSON.stringify(first.notes)).toContain('offset=2');
+
+    const second = dataOf(
+      await call(session, 'list_contacts', {
+        address_books: ['shared'],
+        limit: 2,
+        offset: 2,
+      })
+    );
+    expect(
+      (second.contacts as Record<string, unknown>[]).map(
+        (c) => c.formatted_name
+      )
+    ).toEqual(['Ccc', 'Ddd']);
+    expect(JSON.stringify(second.notes)).toContain('1 more entry');
+
+    const last = dataOf(
+      await call(session, 'search_contacts', {
+        where: { all: [{ field: 'UID', op: 'starts_with', value: 'u-' }] },
+        address_books: ['shared'],
+        limit: 2,
+        offset: 4,
+      })
+    );
+    expect(last.total).toBe(5);
+    expect(last.count).toBe(1);
+    expect(last.notes).toBeUndefined();
+  });
+});
