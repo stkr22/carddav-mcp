@@ -84,7 +84,10 @@ value: "0415"}` finds 15 April whether the card says `19900415`, `1990-04-15`,
   release tag now creates a GitHub release from this changelog and builds the
   image under its own version (`X.Y.Z`, `X.Y`, `latest`); a push to `main`
   builds only `main` and `sha-<commit>`, so a version tag is no longer
-  overwritten by later commits. Dependabot also watches `docker/mcp-http`.
+  overwritten by later commits. Dependabot also watches `docker/mcp-http`. The
+  docs workflow, which published to the upstream project's domain, is removed;
+  `docs/` stays, because the tool reference is checked against the catalogue by
+  a test.
 
 ### Fixed
 
