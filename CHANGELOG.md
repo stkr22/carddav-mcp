@@ -69,6 +69,10 @@ value: "0415"}` finds 15 April whether the card says `19900415`, `1990-04-15`,
   Every card a phrase matched still matches. `query` is now optional when
   `where` is given.
 - `matched_with` can also be `server-prefilter`.
+- The HTTP image's gateway moves to supergateway 4.3.0 with zod overridden to
+  4.x, which clears the high-severity advisories in the pinned 4.2.1 tree
+  (MCP SDK request limits and message routing, zod memory exhaustion) that
+  failed the container scan. Development dependencies are brought up to date.
 - The truncation note names the `offset` of the next page.
 - Require Node.js 24 or newer. CI tests the latest 24 and 26 LTS releases; Node 22 is no longer supported.
 

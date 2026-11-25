@@ -59,7 +59,10 @@ ENTRYPOINT ["node", "dist/index.js"]
 # Fork addition (stkr22): Streamable HTTP for in-cluster use. The server only
 # speaks stdio, so supergateway serves it on :8000/mcp. This is the last stage,
 # so it is the default build target; `--target runtime` gives the stdio image.
-# docker/mcp-http/package-lock.json pins the gateway's full dependency tree.
+# docker/mcp-http/package-lock.json pins the gateway's full dependency tree. It
+# overrides zod to 4.x: supergateway still asks for 3.x, which is inside the range
+# of a high advisory (GHSA-mrhx-c7xc-m3w5) that has no 3.x fix, and the gateway
+# runs fine on 4.x (initialize and tools/list checked through it).
 # Inbound auth: docker/mcp-http/entrypoint.sh turns MCP_API_KEYS (comma-separated)
 # into supergateway's --apiKey flags and refuses to start without one unless
 # MCP_ALLOW_NO_AUTH=true. Clients send `Authorization: Bearer <key>`; /healthz stays
