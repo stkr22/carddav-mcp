@@ -153,6 +153,58 @@ describe('search across two implementations', () => {
   });
 });
 
+const where = async (conditions: Record<string, unknown>) =>
+  data(
+    await server.call('search_contacts', {
+      address_books: ['private'],
+      where: conditions,
+    })
+  );
+
+describe('filters across two implementations', () => {
+  // sabre and Radicale read the same RFC 6352 filter differently at the edges:
+  // `allof`, an empty `prop-filter`, `is-not-defined` and the match types.
+  it('combines conditions with allof', async () => {
+    const answer = await where({
+      all: [
+        { field: 'EMAIL', op: 'starts_with', value: 'grace' },
+        { field: 'EMAIL', op: 'ends_with', value: 'example.net' },
+      ],
+    });
+    expect(answer.count).toBe(1);
+  });
+
+  it('asks whether a property exists, and whether it does not', async () => {
+    expect(
+      (await where({ all: [{ field: 'EMAIL', op: 'exists' }] })).count
+    ).toBe(1);
+    expect((await where({ all: [{ field: 'URL', op: 'exists' }] })).count).toBe(
+      0
+    );
+    expect(
+      (await where({ all: [{ field: 'URL', op: 'missing' }] })).count
+    ).toBe(1);
+  });
+
+  it('compares a date as digits, however sabre stored it', async () => {
+    const answer = await where({
+      all: [{ field: 'BDAY', op: 'contains', value: '1209' }],
+    });
+    expect(answer.count).toBe(1);
+  });
+
+  it('finds the birthday through upcoming_dates', async () => {
+    const answer = data(
+      await server.call('upcoming_dates', {
+        address_books: ['private'],
+        from: '2026-12-09',
+        days: 1,
+      })
+    );
+    expect(answer.count).toBe(1);
+  });
+});
+
 describe('groups on sabre', () => {
   it('round-trips a group through create, read and delete', async () => {
     const listed = data(
