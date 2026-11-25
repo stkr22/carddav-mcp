@@ -1,0 +1,39 @@
+{
+  "name": "carddav-mcp",
+  // Node 26 matches the Dockerfile base image (engines: node >=24). The image is
+  // set in compose.yml, next to the Radicale container the integration suite uses.
+  "dockerComposeFile": "compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspaces/carddav-mcp",
+  "features": {
+    "ghcr.io/stkr22/devcontainer-features/claude-code:4.1.0": {}
+  },
+  // No `features` on purpose: the image already ships git, and with rootless podman
+  // (--userns=keep-id) the features build layer leaves /tmp as 0755, so the Dev
+  // Containers helper fails on `mkdir /tmp/.X11-unix` as the non-root user.
+  "remoteUser": "node",
+  "containerEnv": {
+    "NPM_CONFIG_UPDATE_NOTIFIER": "false",
+    "NPM_CONFIG_FUND": "false"
+  },
+  "remoteEnv": {
+    "CLAUDE_CODE_OAUTH_TOKEN": "${localEnv:CLAUDE_CODE_OAUTH_TOKEN}"
+  },
+  // Reproducible install from the lockfile; skip dependency lifecycle scripts like the Dockerfile does.
+  "postCreateCommand": "npm ci --ignore-scripts",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "oxc.oxc-vscode",
+        "esbenp.prettier-vscode",
+        "vitest.explorer",
+        "EditorConfig.EditorConfig"
+      ],
+      "settings": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.formatOnSave": true,
+        "js/ts.tsdk.path": "node_modules/typescript/lib"
+      }
+    }
+  }
+}
