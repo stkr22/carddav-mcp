@@ -182,6 +182,24 @@ docker run --rm -i \
   ghcr.io/ni-c/carddav-mcp
 ```
 
+### Streamable HTTP image (fork)
+
+The default build target of the `Dockerfile` serves the stdio server over
+Streamable HTTP on port 8000 through [supergateway](https://github.com/supercorp-ai/supergateway);
+`--target runtime` builds the plain stdio image above.
+
+The endpoint needs a bearer token:
+
+| Variable            | Description                                                                                                                                     |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MCP_API_KEYS`      | One or more tokens, comma-separated. Clients send `Authorization: Bearer <token>` to `/mcp`; anything else gets 401. Compared in constant time. |
+| `MCP_ALLOW_NO_AUTH` | `true` lets the container start without `MCP_API_KEYS`. Without either it refuses to start. Default unset.                                      |
+
+`/healthz` stays open for probes. The tokens are removed from the environment
+the stdio server inherits and are never logged; they are visible in the
+container's process arguments, so a network policy in front is still worth
+having.
+
 ### Through mcp-hub
 
 A client that cannot spawn a local process — ChatGPT connectors, Claude on the

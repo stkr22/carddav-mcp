@@ -54,6 +54,14 @@ value: "0415"}` finds 15 April whether the card says `19900415`, `1990-04-15`,
   is **not** part of the `essential` preset, and with `CARDDAV_ALLOW_TOOLS`
   set it is registered only when named.
 
+- **The Streamable HTTP image requires a bearer token.** `MCP_API_KEYS` takes
+  one or more comma-separated tokens; `/mcp` answers 401 without
+  `Authorization: Bearer <token>`, and `/healthz` stays open for the probes.
+  The container refuses to start without the variable unless
+  `MCP_ALLOW_NO_AUTH=true`, so it cannot run open by accident. This is a
+  breaking change for a deployment of this image that relied on the network
+  policy alone: set `MCP_API_KEYS`, or the opt-out, before upgrading.
+
 ### Changed
 
 - **`query` is split into words and every word must match**, in any of the
