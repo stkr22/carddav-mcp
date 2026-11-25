@@ -8,6 +8,7 @@ import {
   syncCollectionBody,
   textOf,
   type PropFilter,
+  type VCardProp,
 } from '../dav-xml.js';
 import { ToolInputError } from '../errors.js';
 import {
@@ -285,11 +286,18 @@ export function registerContactTools(
           term: args.query,
         }));
 
+        // The summary plus whatever is being searched on. The local re-check
+        // runs against the card as retrieved, so a searchable property the
+        // listing does not fetch (NOTE, ROLE) made every match on it look like
+        // a false positive.
+        const retrieved = [
+          ...new Set<VCardProp>([...SUMMARY_PROPS, ...fields]),
+        ];
         const outcome = await searchCards(
           context.api,
           books,
           filters,
-          SUMMARY_PROPS
+          retrieved
         );
 
         const shaped: Record<string, unknown>[] = [];

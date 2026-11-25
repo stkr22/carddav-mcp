@@ -773,3 +773,19 @@ describe('the server introduces itself', () => {
     expect(SERVER_INFO.icons[0]?.mimeType).toBe('image/png');
   });
 });
+
+describe('search_contacts: a field the summary does not carry', () => {
+  it('finds a contact by a note, which a listing never fetches', async () => {
+    // The re-check runs against the card as retrieved. A property that is
+    // searchable but not retrieved made every match on it look like a false
+    // positive, and the local pass dropped it.
+    await open();
+    const data = dataOf(
+      await call(session, 'search_contacts', {
+        query: 'programmer',
+        fields: ['NOTE'],
+      })
+    );
+    expect(data.count).toBe(1);
+  });
+});
