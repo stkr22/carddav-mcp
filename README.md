@@ -184,7 +184,8 @@ docker run --rm -i \
 
 ### Streamable HTTP image (fork)
 
-The default build target of the `Dockerfile` serves the stdio server over
+The default build target of the `Dockerfile` (published as
+`ghcr.io/stkr22/carddav-mcp`, arm64) serves the stdio server over
 Streamable HTTP on port 8000 through [supergateway](https://github.com/supercorp-ai/supergateway);
 `--target runtime` builds the plain stdio image above.
 
@@ -356,14 +357,19 @@ CardDAV containers and calls every tool in the catalogue. See
 ## Releasing
 
 1. Move the `[Unreleased]` entries in `CHANGELOG.md` under the new version.
-2. Bump `version` in `package.json`.
+2. Bump `version` in `package.json` and `package-lock.json`.
 3. `npm run lint && npm run typecheck && npm run build && npm run test:coverage`
 4. Commit, then a signed annotated tag: `git tag -s vX.Y.Z -m "vX.Y.Z"`
 5. `git push origin main vX.Y.Z`
 
-The tag runs the release workflow: npm with provenance through Trusted
-Publishing, a multi-arch image to GHCR with an SBOM, a GitHub release built from
-the changelog, and the MCP registry entry.
+The tag runs two workflows. `release.yml` checks the tag against `package.json`,
+re-runs the checks and publishes a GitHub release from the changelog.
+`image.yml` builds the `http` image and pushes `X.Y.Z`, `X.Y` and `latest` to
+`ghcr.io/stkr22/carddav-mcp`. A push to `main` pushes `main` and `sha-<commit>`
+instead, never a version tag, so a deployment pinned to a version keeps running
+the build that tag was cut from. Nothing is published to npm or the MCP
+registry: the package name and the registry namespace belong to the upstream
+project.
 
 ## Contributing
 

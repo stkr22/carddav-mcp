@@ -76,6 +76,16 @@ value: "0415"}` finds 15 April whether the card says `19900415`, `1990-04-15`,
 - The truncation note names the `offset` of the next page.
 - Require Node.js 24 or newer. CI tests the latest 24 and 26 LTS releases; Node 22 is no longer supported.
 
+- **CI and publishing follow the fork.** Removed the `publish` job that pushed
+  to the upstream author's registry (`ghcr.io/ni-c/carddav-mcp`) and failed on
+  every push to `main`, the npm and MCP-registry release, and the
+  `dependency-review` job, which needs the dependency graph that a fork does not
+  have; `npm audit`, the container scan and Dependabot cover the tree. A
+  release tag now creates a GitHub release from this changelog and builds the
+  image under its own version (`X.Y.Z`, `X.Y`, `latest`); a push to `main`
+  builds only `main` and `sha-<commit>`, so a version tag is no longer
+  overwritten by later commits. Dependabot also watches `docker/mcp-http`.
+
 ### Fixed
 
 - **A match on a property the listing does not fetch is no longer dropped.**
